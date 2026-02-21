@@ -9,9 +9,15 @@ export interface MatchReasoning {
   reputationCheck: string;    // Overall standing/quality assessment
 }
 
+export interface SourceData {
+    value: string;
+    sourceUrl: string;
+}
+
 export interface FacultyMember {
   name: string;
   title: string;
+  university: string;         // New: University Name
   matchScore: number;
   researchAreas: string[];
   alignmentDetails: string;
@@ -19,9 +25,21 @@ export interface FacultyMember {
   recentActivities: string[]; // Specific, dated events
   isActive: boolean;
   profileUrl?: string;
+  photoUrl?: string;          // New: Profile photo URL
   email?: string;             // New: Contact email
-  qsRanking?: string;         // New: QS World Ranking
-  admissionRequirements?: string; // New: Specific admission criteria (GPA, English, etc.)
+  
+  // Admission & Data Fields with Source
+  qsRanking?: string;         // Kept for UI display, preferably short e.g. "QS #10"
+  qsRankingData?: SourceData;
+  deadlineData?: SourceData;
+  applicationReqsData?: SourceData;
+  rpReqsData?: SourceData;
+  tuitionData?: SourceData;
+  scholarshipData?: SourceData;
+  
+  programUrl?: string;        // "链接"
+  universityUrl?: string;     // "官网"
+
   matchReasoning: MatchReasoning;
 }
 

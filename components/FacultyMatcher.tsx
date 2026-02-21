@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { FacultyMember, TargetOption } from '../types';
+import { FacultyMember, TargetOption, SourceData } from '../types';
 import { generateFacultyMatches, parseRequirementText } from '../services/geminiService';
 
 const FacultyMatcher: React.FC = () => {
@@ -112,6 +112,78 @@ const FacultyMatcher: React.FC = () => {
     }
   };
 
+  // Helper for Excel Export formatting
+  const formatSourceField = (data?: SourceData) => {
+      if (!data) return "N/A";
+      if (!data.sourceUrl) return data.value;
+      return `${data.value} [Source: ${data.sourceUrl}]`;
+  };
+
+  const handleExportCSV = () => {
+    if (!results || results.length === 0) return;
+
+    // BOM for UTF-8 in Excel
+    const BOM = "\uFEFF";
+    
+    // Headers as requested
+    const headers = [
+        "学校名称 (中英文)", 
+        "QS排名 [Source: URL]",
+        "截止日期 [Source: URL]",
+        "专业",
+        "链接 (项目)",
+        "申请要求 [Source: URL]",
+        "RP要求 [Source: URL]",
+        "导师姓名",
+        "导师职称",
+        "导师研究方向",
+        "导师论文 (Top 3)",
+        "导师主页 [Source: URL]",
+        "匹配理由",
+        "邮箱",
+        "官网 (大学)",
+        "学费 [Source: URL]",
+        "奖学金 [Source: URL]"
+    ];
+
+    const csvRows = [headers.join(",")];
+
+    results.forEach(prof => {
+        const top3Papers = (prof.recentActivities || []).slice(0, 3).map(a => a.replace(/,/g, ' ')).join("; ");
+        
+        const row = [
+            `"${(prof.university || "").replace(/"/g, '""')}"`,
+            `"${formatSourceField(prof.qsRankingData).replace(/"/g, '""')}"`,
+            `"${formatSourceField(prof.deadlineData).replace(/"/g, '""')}"`,
+            `"${(department || "General").replace(/"/g, '""')}"`,
+            `"${(prof.programUrl || "").replace(/"/g, '""')}"`,
+            `"${formatSourceField(prof.applicationReqsData).replace(/"/g, '""')}"`,
+            `"${formatSourceField(prof.rpReqsData).replace(/"/g, '""')}"`,
+            `"${(prof.name || "").replace(/"/g, '""')}"`,
+            `"${(prof.title || "").replace(/"/g, '""')}"`,
+            `"${(prof.researchAreas || []).join("; ").replace(/"/g, '""')}"`,
+            `"${top3Papers.replace(/"/g, '""')}"`,
+            `"${formatSourceField({ value: "主页链接", sourceUrl: prof.profileUrl || "" }).replace(/"/g, '""')}"`,
+            `"${(prof.alignmentDetails || "").replace(/"/g, '""')}"`,
+            `"${(prof.email || "").replace(/"/g, '""')}"`,
+            `"${(prof.universityUrl || "").replace(/"/g, '""')}"`,
+            `"${formatSourceField(prof.tuitionData).replace(/"/g, '""')}"`,
+            `"${formatSourceField(prof.scholarshipData).replace(/"/g, '""')}"`
+        ];
+        csvRows.push(row.join(","));
+    });
+
+    const csvContent = csvRows.join("\n");
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `ScholarSync_Report_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Helper component for checklist item in the report
   const AuditItem = ({ label, value, icon }: { label: string, value: string, icon: React.ReactNode }) => (
     <div className="flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors group">
@@ -124,6 +196,18 @@ const FacultyMatcher: React.FC = () => {
         </div>
     </div>
   );
+
+  // Regex to parse [Tag][Tag] Content
+  const parseActivity = (text: string) => {
+    // Matches one or more brackets at the start, including [2025][Type] or [2025] [Type]
+    // Group 1: The tags
+    // Group 2: The rest
+    const match = text.match(/^((?:\[[^\]]+\]\s*)+)(.*)/);
+    if (match) {
+        return { tags: match[1].trim(), content: match[2].trim() };
+    }
+    return { tags: '', content: text };
+  };
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -414,7 +498,21 @@ const FacultyMatcher: React.FC = () => {
                             {targets.some(t => t.region || t.university) ? `多区域定向搜索 (共需约 ${targets.reduce((acc, t) => acc + (t.count||5), 0)} 人)` : "🔍 模式: 全球搜索"}
                         </p>
                     </div>
-                    {results && <span className="bg-emerald-100 text-emerald-700 px-4 py-1.5 rounded-full text-sm font-bold shadow-sm">已优选 {results.length} 位</span>}
+                    
+                    <div className="flex gap-2">
+                        {results && (
+                             <button
+                                onClick={handleExportCSV}
+                                className="bg-green-600 text-white px-4 py-1.5 rounded-full text-sm font-bold shadow-sm hover:bg-green-700 transition-colors flex items-center gap-1"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                  <path fillRule="evenodd" d="M4.5 2A1.5 1.5 0 003 3.5v13A1.5 1.5 0 004.5 18h11a1.5 1.5 0 001.5-1.5V7.621a1.5 1.5 0 00-.44-1.06l-4.12-4.122A1.5 1.5 0 0011.378 2H4.5zm2.25 8.5a.75.75 0 000 1.5h6.5a.75.75 0 000-1.5h-6.5zm0 3a.75.75 0 000 1.5h6.5a.75.75 0 000-1.5h-6.5z" clipRule="evenodd" />
+                                </svg>
+                                导出 Excel
+                            </button>
+                        )}
+                        {results && <span className="bg-emerald-100 text-emerald-700 px-4 py-1.5 rounded-full text-sm font-bold shadow-sm">已优选 {results.length} 位</span>}
+                    </div>
                  </div>
                  
                  <div className="flex-1 p-4 md:p-8 space-y-8 overflow-y-auto max-h-[900px] bg-slate-50/30 rounded-b-[2rem]">
@@ -465,52 +563,88 @@ const FacultyMatcher: React.FC = () => {
 
                         {/* Header Section */}
                         <div className="flex flex-col md:flex-row justify-between items-start mb-6 gap-4">
-                            <div>
-                                <div className="flex items-center gap-4 mb-2">
-                                    <h4 className="text-2xl font-extrabold text-gray-900">
-                                        {prof.name}
-                                    </h4>
-                                    <div className="flex items-center gap-2">
-                                        {prof.profileUrl && (
-                                            <a 
-                                                href={prof.profileUrl} 
-                                                target="_blank" 
-                                                rel="noopener noreferrer" 
-                                                className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-bold hover:bg-blue-600 hover:text-white transition-all border border-blue-100"
-                                                title="访问个人主页"
-                                            >
-                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                                                    <path fillRule="evenodd" d="M4.25 5.5a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h8.5a.75.75 0 00.75-.75v-4a.75.75 0 011.5 0v4A2.25 2.25 0 0112.75 17h-8.5A2.25 2.25 0 012 14.75v-8.5A2.25 2.25 0 014.25 4h5a.75.75 0 010 1.5h-5z" clipRule="evenodd" />
-                                                    <path fillRule="evenodd" d="M6.194 12.753a.75.75 0 001.06.053L16.5 4.44v2.81a.75.75 0 001.5 0v-4.5a.75.75 0 00-.75-.75h-4.5a.75.75 0 000 1.5h2.553l-9.056 8.194a.75.75 0 00-.053 1.06z" clipRule="evenodd" />
-                                                </svg>
-                                                个人主页
-                                            </a>
-                                        )}
-                                        {prof.email && (
-                                            <a 
-                                                href={`mailto:${prof.email}`}
-                                                className="inline-flex items-center gap-1.5 px-3 py-1 bg-gray-50 text-gray-600 rounded-full text-xs font-bold hover:bg-gray-200 transition-all border border-gray-200"
-                                                title={`Email: ${prof.email}`}
-                                            >
-                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                                                    <path d="M3 4a2 2 0 00-2 2v1.161l8.441 4.221a1.25 1.25 0 001.118 0L19 7.162V6a2 2 0 00-2-2H3z" />
-                                                    <path d="M19 8.839l-7.77 3.885a2.75 2.75 0 01-2.46 0L1 8.839V14a2 2 0 002 2h14a2 2 0 002-2V8.839z" />
-                                                </svg>
-                                                联系邮箱
-                                            </a>
-                                        )}
+                            {/* Left Side: Photo & Name */}
+                            <div className="flex flex-col md:flex-row gap-5 w-full">
+                                {/* Profile Photo */}
+                                <div className="flex-shrink-0">
+                                    {prof.photoUrl ? (
+                                        <div className="w-20 h-20 rounded-2xl overflow-hidden shadow-md border border-gray-100 bg-gray-50 relative group/photo">
+                                            <img 
+                                                src={prof.photoUrl} 
+                                                alt={prof.name} 
+                                                className="w-full h-full object-cover"
+                                                onError={(e) => {
+                                                    e.currentTarget.style.display = 'none';
+                                                    e.currentTarget.parentElement?.classList.add('hidden');
+                                                    const fallback = document.getElementById(`fallback-${idx}`);
+                                                    if (fallback) fallback.classList.remove('hidden');
+                                                }}
+                                            />
+                                            {/* Fallback Element (Hidden by default, shown on error) */}
+                                            <div id={`fallback-${idx}`} className="hidden absolute inset-0 bg-indigo-100 flex items-center justify-center text-indigo-400 font-bold text-2xl">
+                                                {prof.name.charAt(0)}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="w-20 h-20 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-400 font-bold text-2xl shadow-inner border border-indigo-50">
+                                            {prof.name.charAt(0)}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="flex-1">
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-2">
+                                        <h4 className="text-2xl font-extrabold text-gray-900 leading-tight">
+                                            {prof.name}
+                                        </h4>
+                                        <div className="flex items-center gap-2">
+                                            {prof.profileUrl && (
+                                                <a 
+                                                    href={prof.profileUrl} 
+                                                    target="_blank" 
+                                                    rel="noopener noreferrer" 
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-bold hover:bg-blue-600 hover:text-white transition-all border border-blue-100"
+                                                    title="访问个人主页"
+                                                >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                                                        <path fillRule="evenodd" d="M4.25 5.5a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h8.5a.75.75 0 00.75-.75v-4a.75.75 0 011.5 0v4A2.25 2.25 0 0112.75 17h-8.5A2.25 2.25 0 012 14.75v-8.5A2.25 2.25 0 014.25 4h5a.75.75 0 010 1.5h-5z" clipRule="evenodd" />
+                                                        <path fillRule="evenodd" d="M6.194 12.753a.75.75 0 001.06.053L16.5 4.44v2.81a.75.75 0 001.5 0v-4.5a.75.75 0 00-.75-.75h-4.5a.75.75 0 000 1.5h2.553l-9.056 8.194a.75.75 0 00-.053 1.06z" clipRule="evenodd" />
+                                                    </svg>
+                                                    个人主页
+                                                </a>
+                                            )}
+                                            {prof.email && (
+                                                <a 
+                                                    href={`mailto:${prof.email}`}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-gray-50 text-gray-600 rounded-full text-xs font-bold hover:bg-gray-200 transition-all border border-gray-200"
+                                                    title={`Email: ${prof.email}`}
+                                                >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                                                        <path d="M3 4a2 2 0 00-2 2v1.161l8.441 4.221a1.25 1.25 0 001.118 0L19 7.162V6a2 2 0 00-2-2H3z" />
+                                                        <path d="M19 8.839l-7.77 3.885a2.75 2.75 0 01-2.46 0L1 8.839V14a2 2 0 002 2h14a2 2 0 002-2V8.839z" />
+                                                    </svg>
+                                                    联系邮箱
+                                                </a>
+                                            )}
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="flex flex-col gap-1">
+                                        <div className="flex items-center gap-3">
+                                            <p className="text-sm text-gray-500 font-semibold uppercase tracking-wide">{prof.title}</p>
+                                            <span className="w-1 h-1 rounded-full bg-gray-300"></span>
+                                            <p className="text-sm text-gray-900 font-bold">{prof.university}</p>
+                                        </div>
+                                        <div className="flex items-center gap-2 mt-1">
+                                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${prof.isActive ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' : 'text-rose-700 bg-rose-50 border border-rose-100'}`}>
+                                                {prof.isActive ? '在职活跃' : '状态未知/离职'}
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
-                                
-                                <div className="flex items-center gap-3">
-                                    <p className="text-sm text-gray-500 font-semibold uppercase tracking-wide">{prof.title}</p>
-                                    <span className="w-1 h-1 rounded-full bg-gray-300"></span>
-                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${prof.isActive ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' : 'text-rose-700 bg-rose-50 border border-rose-100'}`}>
-                                        {prof.isActive ? '在职活跃' : '状态未知/离职'}
-                                    </span>
-                                </div>
                             </div>
-                            <div className="flex flex-col items-end gap-2">
+
+                            <div className="flex flex-col items-end gap-2 min-w-[80px]">
                                 {studentProfile.trim() && (
                                     <div className={`px-5 py-2 rounded-2xl text-base font-bold shadow-sm flex items-center gap-2 ${
                                         prof.matchScore >= 90 ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white' :
@@ -535,26 +669,6 @@ const FacultyMatcher: React.FC = () => {
                                 ))}
                              </div>
                         </div>
-
-                        {/* === ADMISSION REQUIREMENTS (NEW) === */}
-                        {prof.admissionRequirements && (
-                            <div className="mb-8 p-4 bg-teal-50 border border-teal-100 rounded-xl relative overflow-hidden">
-                                <div className="absolute top-0 right-0 p-2 opacity-10">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-16 h-16 text-teal-900">
-                                        <path d="M11.7 2.805a.75.75 0 01.6 0A60.65 60.65 0 0122.83 8.72a.75.75 0 01-.231 1.337 49.949 49.949 0 00-9.902 3.912l-.003.002-.34.18a.75.75 0 01-.707 0A50.009 50.009 0 007.5 12.174v-.224c0-.131.067-.248.182-.311a51.002 51.002 0 016.89-3.432.75.75 0 01.666 1.345 49.516 49.516 0 00-6.237 2.972V14.12a.75.75 0 01-.483.696A49.935 49.935 0 013.5 16.208v-2.31c0-1.875 4.39-3.722 8.2-3.722z" />
-                                    </svg>
-                                </div>
-                                <h6 className="text-[11px] font-bold text-teal-700 uppercase tracking-wider mb-2 flex items-center gap-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                    </svg>
-                                    入学申请要求参考
-                                </h6>
-                                <p className="text-sm text-teal-900 font-medium leading-relaxed relative z-10 whitespace-pre-wrap">
-                                    {prof.admissionRequirements}
-                                </p>
-                            </div>
-                        )}
 
                         {/* === AUDIT REPORT CARD === */}
                         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm ring-1 ring-slate-100/50 mb-8 relative">
@@ -647,7 +761,7 @@ const FacultyMatcher: React.FC = () => {
                                     <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
-                                    近五年学术动态 (2020-2025)
+                                    近五年学术动态 (按时间倒序)
                                 </h5>
                                 
                                 {/* Summary Block */}
@@ -659,16 +773,40 @@ const FacultyMatcher: React.FC = () => {
 
                                 {/* Timeline with Scroll for long lists */}
                                 {prof.recentActivities && prof.recentActivities.length > 0 && (
-                                    <div className="max-h-80 overflow-y-auto pr-2 custom-scrollbar">
+                                    <div className="max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                                         <div className="space-y-0 relative border-l border-gray-100 ml-2 pt-1 pb-1">
-                                            {prof.recentActivities.map((activity, i) => (
-                                                <div key={i} className="mb-4 ml-6 relative group/item">
-                                                    <span className="absolute -left-[31px] top-1.5 w-2.5 h-2.5 rounded-full bg-white border-2 border-blue-200 group-hover/item:border-blue-400 transition-colors"></span>
-                                                    <p className="text-sm text-gray-600 leading-relaxed group-hover/item:text-gray-900 transition-colors">{activity}</p>
-                                                </div>
-                                            ))}
+                                            {prof.recentActivities.map((activity, i) => {
+                                                const parsed = parseActivity(activity);
+                                                return (
+                                                    <div key={i} className="mb-4 ml-6 relative group/item">
+                                                        <span className="absolute -left-[31px] top-1.5 w-2.5 h-2.5 rounded-full bg-white border-2 border-blue-200 group-hover/item:border-blue-400 transition-colors"></span>
+                                                        <p className="text-sm text-gray-600 leading-relaxed group-hover/item:text-gray-900 transition-colors">
+                                                            {parsed.tags ? (
+                                                                <>
+                                                                    <span className="font-bold text-blue-700 mr-2">{parsed.tags}</span>
+                                                                    <span className="text-gray-700 font-medium">{parsed.content}</span>
+                                                                </>
+                                                            ) : (
+                                                                activity
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     </div>
+                                )}
+                            </div>
+                        )}
+                        
+                        {/* Admission Info Preview (Optional view in card) */}
+                        {prof.deadlineData && (
+                            <div className="mt-4 p-4 bg-purple-50 rounded-xl border border-purple-100 text-xs text-purple-800 flex justify-between items-center">
+                                <div>
+                                    <span className="font-bold">Next Deadline:</span> {prof.deadlineData.value}
+                                </div>
+                                {prof.deadlineData.sourceUrl && (
+                                    <a href={prof.deadlineData.sourceUrl} target="_blank" rel="noreferrer" className="underline opacity-60 hover:opacity-100">Source</a>
                                 )}
                             </div>
                         )}

@@ -160,13 +160,16 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
   if (totalCount < 1) totalCount = 10;
 
   let promptContent = `
-    Role: You are a rigorous Academic Admissions Auditor. Your goal is to find high-quality faculty matches with VERIFIED data.
+    Role: You are a rigorous Academic Admissions Auditor. Your goal is to find high-quality faculty matches with VERIFIED admissions data.
+    
+    **CURRENT DATE CONTEXT**: Today is Feb 10, 2026.
+    **DEADLINE REQUIREMENT**: You MUST look for future deadlines (Spring 2027 or Fall 2027). Do NOT return past dates from 2024/2025 unless no other info is available.
 
     User Inputs:
     - Student Profile: "${hasProfile ? studentProfile : "Not provided"}"
     - Department Focus: "${department || "General"}"
     - Target Position Requirement: "${targetPosition || "Full Professor"}" (See Rank Logic)
-    - Entry Year: "${entryYear || "N/A"}"
+    - Entry Year: "${entryYear || "N/A"}" (Search for this intake)
     - Scholarship Need: "${scholarship || "N/A"}"
     - EXCLUSIONS: "${exclusions || "None"}"
     - Target URL: "${directoryUrl || "None"}"
@@ -185,39 +188,73 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
       - User says "Associate" -> Full & Associate accepted.
       - User says "Assistant" or "Any" -> All accepted.
 
-    **STRICT EXECUTION PROTOCOL (MUST FOLLOW)**:
-    1. **SEARCH**: Find the faculty directory for the target university/department.
-    2. **INDIVIDUAL VERIFICATION (CRITICAL)**:
-       - For EACH candidate, you MUST find their **Official Personal Profile Page** (university domain).
-       - **DO NOT** rely on the directory list snippet. Open the specific profile URL.
-       - **IF NO PROFILE URL OR 404**: DISCARD this candidate immediately. Do not recommend.
-       - **IF PROFILE IS EMPTY/MISSING INFO**: DISCARD this candidate.
-       - **NO PIECING TOGETHER**: Do not invent research interests from general university pages. They must come from the *individual's* page.
-    3. **DATA EXTRACTION**:
-       - Extract Research Areas, Email, and Recent Activity (2020-2025) *strictly* from this verified profile page.
-    4. **ADMISSION REQUIREMENTS (DEPARTMENT LEVEL)**:
-       - Search for the *Department's* specific PhD/MPhil admission page for the ${entryYear} intake.
-       - **FORMAT RULE**: You MUST quote the **Original English Text** first, then provide the **Chinese Translation**.
-       - Format: "Original: [English text from website]\n中文翻译: [Chinese translation]"
-       - Include: GPA threshold, English scores (IELTS/TOEFL), and specific degree requirements.
-       - If requirements are not found, state "Original: Not available online\n中文翻译: 未在官网找到明确录取要求".
-    5. **NEGATIVE FILTER**: Exclude any names/universities in "EXCLUSIONS".
+    **CRITICAL EXECUTION PROTOCOL - NO 404s ALLOWED**:
+    1. **INDIVIDUAL PAGE DISCOVERY & URL VERIFICATION**:
+       - **Action**: You MUST search specifically for each potential candidate's name to find their **Official University Profile Page**.
+       - **Query**: Use queries like "Professor [Name] [University] official profile".
+       - **Validation**: 
+          - **CHECK 1**: Is the URL from the official university domain?
+          - **CHECK 2**: Is it a specific profile page (e.g., ends in ID or Name), NOT a general list/directory?
+          - **CHECK 3 (Crucial)**: If the URL looks like a generic list or a pattern-matched guess (e.g., just an ID you guessed), **DO NOT USE IT**. Search again.
+       - **Fallback**: If you cannot find a working, specific profile URL after searching, **DISCARD THE CANDIDATE**. Better to return fewer results than broken links.
+    
+    2. **DATA EXTRACTION**:
+       - Extract Research Areas, Email, and Recent Activity (2020-2025).
+       - **PROFILE PHOTO**: Attempt to find the URL of the professor's official profile photo.
+
+    3. **ADMISSION & PROGRAM DATA (MANDATORY)**:
+       - For each faculty, identify their University and Department.
+       - **SEARCH**: You MUST search for the specific PhD/Master application information for their department (e.g. "[Uni] [Dept] PhD admission deadline 2027").
+       - **EXTRACT THE FOLLOWING WITH SOURCE URLs**:
+         - **QS Ranking**: World ranking of the uni.
+         - **Deadline**: Next application deadline (Spring/Fall 2027).
+         - **Application Reqs**: GPA, English scores, etc.
+         - **RP Requirements**: Research Proposal specific word count/format.
+         - **Tuition**: International student tuition fee.
+         - **Scholarship**: Available funding/scholarship info.
+       - **Constraint**: If you cannot find exact 2027 data, find the most recent reliable info and note the source.
+
+    4. **NEGATIVE FILTER**: Exclude any names/universities in "EXCLUSIONS".
 
     **OUTPUT RULES**:
     - **QS Ranking**: Include current QS World Ranking.
     - **Email**: Must be the official academic email.
     - **Research Areas**: Format as "English Term (中文翻译)".
     - **Match Reasoning**: Chinese, concise, verified.
-    - **Language**: Simplified Chinese (except for the Original English admission text).
+    - **Language**: Simplified Chinese.
+    - **URL sources**: For every admission data point, provide the \`sourceUrl\`.
+
+    **RECENT ACADEMIC ACTIVITIES (2020-2025) - DETAILED PAPERS & PROJECTS**:
+    - **MANDATORY CONTENT**: You MUST include the **Full Title** of the paper or project. 
+    - **WARNING**: DO NOT output lines like "[2025][Type]" with no content. That is a failure.
+    - **STRICT FORMAT**: \`[Year][Type-Level] Actual Title (Chinese Translation) - Source\`
+      - Correct: \`[2025][论文-顶刊] Learning from Noise (从噪声中学习) - CVPR\`
+      - Incorrect: \`[2025][论文-顶刊]\` (MISSING CONTENT)
+    - **Types**: \`[论文-顶刊]\`, \`[论文-期刊]\`, \`[论文-会议]\`, \`[项目-国家级]\`, \`[项目-省部级]\`.
+    - **2025 PRIORITY**: Aggressively search for 2025 works (Accepted, In Press, Preprints). **DO NOT IGNORE 2025**.
+    - **QUANTITY**: **List AT LEAST 5 items**. Fill the list with relevant papers.
+
+    **SORTING**:
+    - **STRICTLY Reverse Chronological**: 2025 -> 2024 -> 2023 -> 2022 -> 2021 -> 2020.
+    - Top of the list MUST be the newest (2025/2024).
 
     Constraints:
-    - **No Hallucinations**: If you can't find a professor's specific page, SKIP them.
-    - It is better to return 3 verified results than 10 broken ones.
+    - **No Hallucinations**: If a URL or email is uncertain, DROP the candidate.
+    - **No "Non-Chinese Citizen" Clause**: Do not hallucinate admission requirements.
   `;
 
   if (manualContent && manualContent.trim().length > 0) {
     promptContent += `\nProvided Text Content:\n${manualContent}`;
   }
+
+  const sourceDataSchema = {
+    type: Type.OBJECT,
+    properties: {
+        value: { type: Type.STRING, description: "The content/value extracted." },
+        sourceUrl: { type: Type.STRING, description: "The specific URL where this info was found." }
+    },
+    required: ["value", "sourceUrl"]
+  };
 
   const responseSchema: Schema = {
     type: Type.ARRAY,
@@ -226,16 +263,28 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
       properties: {
         name: { type: Type.STRING },
         title: { type: Type.STRING },
+        university: { type: Type.STRING, description: "Full Name of University (EN & CN)" },
         matchScore: { type: Type.INTEGER },
         researchAreas: { type: Type.ARRAY, items: { type: Type.STRING, description: "Research areas: English (Chinese)" } },
         alignmentDetails: { type: Type.STRING },
         activitySummary: { type: Type.STRING },
-        recentActivities: { type: Type.ARRAY, items: { type: Type.STRING } },
+        recentActivities: { type: Type.ARRAY, items: { type: Type.STRING, description: "Format: [Year][Type-Level] Title (Chinese) - Source" } },
         isActive: { type: Type.BOOLEAN },
         profileUrl: { type: Type.STRING },
+        photoUrl: { type: Type.STRING, description: "URL to the professor's profile photo" },
         email: { type: Type.STRING },
+        
+        // New Admission Data Fields
         qsRanking: { type: Type.STRING },
-        admissionRequirements: { type: Type.STRING, description: "Format: Original: [English Text] \\n 中文翻译: [Chinese Translation]" },
+        qsRankingData: sourceDataSchema,
+        deadlineData: sourceDataSchema,
+        applicationReqsData: sourceDataSchema,
+        rpReqsData: sourceDataSchema,
+        tuitionData: sourceDataSchema,
+        scholarshipData: sourceDataSchema,
+        programUrl: { type: Type.STRING, description: "URL for the specific department/program admission page" },
+        universityUrl: { type: Type.STRING, description: "URL for the main university website" },
+
         matchReasoning: {
           type: Type.OBJECT,
           properties: {
@@ -250,7 +299,7 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
           required: ["locationCheck", "universityCheck", "departmentCheck", "researchFit", "positionCheck", "activityCheck", "reputationCheck"]
         }
       },
-      required: ["name", "title", "matchScore", "researchAreas", "alignmentDetails", "isActive", "activitySummary", "recentActivities", "matchReasoning", "profileUrl", "admissionRequirements"]
+      required: ["name", "title", "university", "matchScore", "researchAreas", "alignmentDetails", "isActive", "activitySummary", "recentActivities", "matchReasoning", "profileUrl"]
     }
   };
 
