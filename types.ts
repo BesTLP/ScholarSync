@@ -60,3 +60,71 @@ export interface ChatMessage {
   text: string;
   timestamp: number;
 }
+
+export interface Education {
+  id: string;
+  school: string;
+  degree: string;
+  major: string;
+  gpa: string;
+  startDate: string;
+  endDate: string;
+  extraInfo?: string;
+  notes?: string;
+}
+
+export interface Work {
+  id: string;
+  company: string;
+  position: string;
+  startDate: string;
+  endDate: string;
+  description: string;
+}
+
+export interface Award {
+  id: string;
+  name: string;
+  level: string;
+  date: string;
+  description: string;
+}
+
+export interface Contact {
+  id: string;
+  type: 'phone' | 'address';
+  value: string;
+}
+
+export interface ClientDocument {
+  id: string;
+  title: string;
+  type: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Client {
+  id: string;
+  name: string;
+  status: 'active' | 'archived';
+  createdAt: string;
+  advisor?: string;
+  gpa?: string;
+  educationCount?: number;
+  documentCount?: number;
+  contact?: string;
+  educations?: Education[];
+  works?: Work[];
+  awards?: Award[];
+  contacts?: Contact[];
+  academicAchievements?: string;
+  extracurriculars?: string;
+  interests?: string;
+  careerAspirations?: string;
+  experiencesAndChallenges?: string;
+  skillsAndQualities?: string;
+  growthAndDevelopment?: string;
+  documents?: ClientDocument[];
+}

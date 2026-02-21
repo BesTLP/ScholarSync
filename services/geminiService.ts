@@ -369,3 +369,167 @@ export const getFastResponse = async (query: string): Promise<string> => {
   });
   return response.text || "";
 };
+
+export const generatePSOutline = async (params: {
+  studentName: string;
+  targetUni: string;
+  degree: string;
+  major: string;
+  outlineCount: number;
+  instructions?: string;
+  studentProfile?: any;
+}) => {
+  const ai = getClient();
+  const prompt = `
+    You are an expert college admissions consultant. 
+    Generate a detailed Personal Statement (PS) outline for the following student:
+    Name: ${params.studentName}
+    Target University: ${params.targetUni}
+    Degree: ${params.degree}
+    Major: ${params.major}
+    Number of Paragraphs: ${params.outlineCount}
+    Additional Instructions: ${params.instructions || 'None'}
+    Student Profile: ${JSON.stringify(params.studentProfile || {})}
+
+    The outline should be professional, compelling, and tailored to the target university and major.
+    Each paragraph outline should be a concise description of what the paragraph will cover.
+    Return the result as a JSON array of strings, where each string is a paragraph outline.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING }
+      }
+    }
+  });
+
+  return JSON.parse(response.text || "[]");
+};
+
+export const generatePSContent = async (params: {
+  studentName: string;
+  targetUni: string;
+  degree: string;
+  major: string;
+  outlines: string[];
+  instructions?: string;
+}) => {
+  const ai = getClient();
+  const prompt = `
+    You are an expert college admissions consultant. 
+    Write a full Personal Statement (PS) based on the following outlines:
+    Name: ${params.studentName}
+    Target University: ${params.targetUni}
+    Degree: ${params.degree}
+    Major: ${params.major}
+    Outlines: ${params.outlines.join('\n')}
+    Additional Instructions: ${params.instructions || 'None'}
+
+    The PS should be written in the first person, sounding natural, authentic, and highly persuasive.
+    Use a professional yet personal tone.
+    Ensure smooth transitions between paragraphs.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+  });
+
+  return response.text;
+};
+
+export const generateEssay = async (params: {
+  studentName: string;
+  targetUni?: string;
+  prompt: string;
+  focusPoints?: string;
+  length: number;
+  studentProfile?: any;
+}) => {
+  const ai = getClient();
+  const prompt = `
+    You are an expert college admissions consultant. 
+    Write a supplemental essay for the following student:
+    Name: ${params.studentName}
+    Target University: ${params.targetUni || 'Not specified'}
+    Essay Prompt: ${params.prompt}
+    Focus Points: ${params.focusPoints || 'None'}
+    Target Length: ${params.length} words
+    Student Profile: ${JSON.stringify(params.studentProfile || {})}
+
+    The essay should be authentic, insightful, and directly address the prompt.
+    Ensure it reflects the student's unique voice and strengths.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+  });
+
+  return response.text;
+};
+
+export const generateLOR = async (params: {
+  studentName: string;
+  recommenderName: string;
+  recommenderTitle: string;
+  relationship: string;
+  targetUni: string;
+  major: string;
+  focusPoints?: string;
+  studentProfile?: any;
+}) => {
+  const ai = getClient();
+  const prompt = `
+    You are writing a Letter of Recommendation (LOR) for a student.
+    Student Name: ${params.studentName}
+    Recommender Name: ${params.recommenderName}
+    Recommender Title: ${params.recommenderTitle}
+    Relationship: ${params.relationship}
+    Target University: ${params.targetUni}
+    Major: ${params.major}
+    Focus Points: ${params.focusPoints || 'None'}
+    Student Profile: ${JSON.stringify(params.studentProfile || {})}
+
+    The letter should be professional, specific, and highlight the student's academic and personal strengths.
+    Use a formal tone suitable for university admissions.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+  });
+
+  return response.text;
+};
+
+export const generateCV = async (params: {
+  studentName: string;
+  studentProfile: any;
+  instructions?: string;
+}) => {
+  const ai = getClient();
+  const prompt = `
+    You are an expert career coach. 
+    Generate a professional CV/Resume for the following student:
+    Name: ${params.studentName}
+    Student Profile: ${JSON.stringify(params.studentProfile)}
+    Additional Instructions: ${params.instructions || 'None'}
+
+    Format the CV clearly with sections for Education, Experience, Awards, Skills, etc.
+    Use action verbs and quantify achievements where possible.
+    Return the result as a well-formatted Markdown string.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+  });
+
+  return response.text;
+};
