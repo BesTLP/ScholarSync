@@ -76,6 +76,8 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
 
   const record = isDatabaseView ? (prof as FacultyRecord) : null;
 
+  if (!prof) return null;
+
   return (
     <div className="bg-white p-6 md:p-8 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all duration-300 group relative">
         {/* QS Badge */}
@@ -282,22 +284,22 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                     <div className="space-y-1">
                         <AuditItem 
                             label="区域 / 国家" 
-                            value={prof.matchReasoning.locationCheck}
+                            value={prof.matchReasoning?.locationCheck || '未核查'}
                             icon={<MapPin size={16} />}
                         />
                         <AuditItem 
                             label="所属院校" 
-                            value={prof.matchReasoning.universityCheck}
+                            value={prof.matchReasoning?.universityCheck || '未核查'}
                             icon={<School size={16} />}
                         />
                         <AuditItem 
                             label="所在院系" 
-                            value={prof.matchReasoning.departmentCheck}
+                            value={prof.matchReasoning?.departmentCheck || '未核查'}
                             icon={<Building2 size={16} />}
                         />
                         <AuditItem 
                             label="目前职级" 
-                            value={prof.matchReasoning.positionCheck}
+                            value={prof.matchReasoning?.positionCheck || '未核查'}
                             icon={<Briefcase size={16} />}
                         />
                     </div>
@@ -313,11 +315,11 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                     <div className="grid grid-cols-1 gap-3 mb-6">
                         <div className="bg-amber-50 rounded-xl p-3.5 border border-amber-100">
                             <div className="text-[10px] font-bold text-amber-600/70 uppercase mb-1">近期学术活跃度</div>
-                            <div className="text-sm font-semibold text-amber-900 leading-snug">{prof.matchReasoning.activityCheck}</div>
+                            <div className="text-sm font-semibold text-amber-900 leading-snug">{prof.matchReasoning?.activityCheck || '暂无评价'}</div>
                         </div>
                         <div className="bg-blue-50 rounded-xl p-3.5 border border-blue-100">
                             <div className="text-[10px] font-bold text-blue-600/70 uppercase mb-1">综合声望评价</div>
-                            <div className="text-sm font-semibold text-blue-900 leading-snug">{prof.matchReasoning.reputationCheck}</div>
+                            <div className="text-sm font-semibold text-blue-900 leading-snug">{prof.matchReasoning?.reputationCheck || '暂无评价'}</div>
                         </div>
                     </div>
                     
@@ -328,7 +330,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                         </h6>
                         <div className="bg-gray-50 rounded-xl p-3.5 border border-gray-100">
                             <p className="text-sm text-gray-600 leading-relaxed font-medium">
-                                {prof.matchReasoning.researchFit}
+                                {prof.matchReasoning?.researchFit || '暂无分析'}
                             </p>
                         </div>
                     </div>

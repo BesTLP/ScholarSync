@@ -47,6 +47,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isManualEntryModalOpen, setIsManualEntryModalOpen] = useState(false);
+  const [linkingFacultyId, setLinkingFacultyId] = useState<string | null>(null);
 
   // Derived Data for Filters
   const countries = useMemo(() => Array.from(new Set(facultyDatabase.map(f => f.country))).filter(Boolean).sort(), [facultyDatabase]);
@@ -289,8 +290,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                         onEdit={(record) => console.log('Edit', record)}
                         onDelete={onDeleteFaculty}
                         onRefresh={(record) => console.log('Refresh', record)}
-                        onLink={(prof) => console.log('Link', prof)}
-                        onUnlink={onUnlinkFaculty}
+                        onLink={(prof) => setLinkingFacultyId(faculty.id)}
+                        onUnlink={(id) => onUnlinkFaculty(faculty.id, id)}
                         linkedClientCount={faculty.linkedClientIds?.length || 0}
                       />
                     </div>
@@ -394,7 +395,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-2">
                               <button 
-                                onClick={() => console.log('Link', faculty)}
+                                onClick={() => setLinkingFacultyId(faculty.id)}
                                 className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                                 title="关联学生"
                               >
@@ -434,6 +435,67 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
           setIsManualEntryModalOpen(false);
         }}
       />
+
+      {/* Client Selection Modal for Linking */}
+      {linkingFacultyId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-gray-900">选择要关联的学生</h3>
+              <button onClick={() => setLinkingFacultyId(null)} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+              {clients.length === 0 ? (
+                <p className="text-center text-gray-500 py-8">暂无学生档案</p>
+              ) : (
+                clients.map(client => {
+                  const isLinked = facultyDatabase.find(f => f.id === linkingFacultyId)?.linkedClientIds?.includes(client.id);
+                  return (
+                    <button
+                      key={client.id}
+                      onClick={() => {
+                        if (isLinked) {
+                          onUnlinkFaculty(linkingFacultyId, client.id);
+                        } else {
+                          onLinkFaculty(linkingFacultyId, client.id);
+                        }
+                        setLinkingFacultyId(null);
+                      }}
+                      className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${
+                        isLinked 
+                          ? 'border-blue-200 bg-blue-50 text-blue-700' 
+                          : 'border-gray-100 bg-gray-50 hover:border-blue-200 hover:bg-blue-50/50 text-gray-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center font-bold text-xs">
+                          {client.name.charAt(0)}
+                        </div>
+                        <span className="font-medium">{client.name}</span>
+                      </div>
+                      {isLinked ? (
+                        <span className="text-xs font-bold bg-blue-100 px-2 py-1 rounded text-blue-600">已关联</span>
+                      ) : (
+                        <Plus size={16} className="text-gray-400" />
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+              <button
+                onClick={() => setLinkingFacultyId(null)}
+                className="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

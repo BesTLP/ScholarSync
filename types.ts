@@ -18,6 +18,7 @@ export interface FacultyMember {
   name: string;
   title: string;
   university: string;         // New: University Name
+  department?: string;        // New: Department
   matchScore: number;
   researchAreas: string[];
   alignmentDetails: string;

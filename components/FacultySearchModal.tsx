@@ -104,7 +104,7 @@ const FacultySearchModal: React.FC<FacultySearchModalProps> = ({ isOpen, onClose
                   className={`relative group cursor-pointer transition-all ${selectedIndices.includes(index) ? 'ring-2 ring-cyan-500 rounded-2xl' : ''}`}
                   onClick={() => toggleSelection(index)}
                 >
-                  <FacultyCard faculty={faculty} viewMode="grid" showActions={false} />
+                  <FacultyCard prof={faculty} isDatabaseView={false} />
                   <div className={`absolute top-4 right-4 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
                     selectedIndices.includes(index) ? 'bg-cyan-500 border-cyan-500 text-white' : 'bg-white border-gray-200 text-transparent group-hover:border-cyan-300'
                   }`}>

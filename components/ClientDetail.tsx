@@ -917,11 +917,11 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
                   .map(faculty => (
                     <FacultyCard
                       key={faculty.id}
-                      faculty={faculty}
-                      viewMode="grid"
-                      showActions={true}
+                      prof={faculty}
+                      isDatabaseView={true}
                       isLinked={true}
                       onUnlink={() => onUnlinkFacultyFromClient?.(faculty.id, client.id)}
+                      linkedClientCount={faculty.linkedClientIds?.length || 0}
                     />
                   ))}
               </div>

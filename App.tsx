@@ -155,13 +155,17 @@ function App() {
 
     if (existing) {
       // Update existing
-      const updatedRecord: FacultyRecord = {
-        ...existing,
-        ...faculty, // Overwrite with new data
-        updatedAt: new Date().toISOString(),
-        source: 'search'
-      };
-      setFacultyDatabase(facultyDatabase.map(f => f.id === existing.id ? updatedRecord : f));
+      setFacultyDatabase(prev => prev.map(f => {
+        if (f.id === existing.id) {
+          return {
+            ...f,
+            ...faculty,
+            updatedAt: new Date().toISOString(),
+            source: 'search'
+          };
+        }
+        return f;
+      }));
       return existing.id;
     }
 
@@ -176,7 +180,7 @@ function App() {
       source: 'search',
       linkedClientIds: []
     };
-    setFacultyDatabase([...facultyDatabase, newRecord]);
+    setFacultyDatabase(prev => [...prev, newRecord]);
     return newId;
   };
 
@@ -188,10 +192,10 @@ function App() {
 
   const deleteFacultyRecord = (id: string) => {
     // 1. Remove from database
-    setFacultyDatabase(facultyDatabase.filter(f => f.id !== id));
+    setFacultyDatabase(prev => prev.filter(f => f.id !== id));
     
     // 2. Remove references from clients
-    const updatedClients = clients.map(client => {
+    setClients(prev => prev.map(client => {
       if (client.linkedFacultyIds?.includes(id)) {
         return {
           ...client,
@@ -199,16 +203,18 @@ function App() {
         };
       }
       return client;
-    });
-    setClients(updatedClients);
+    }));
     
     // Update selected client if needed
-    if (selectedClient && selectedClient.linkedFacultyIds?.includes(id)) {
-      setSelectedClient({
-        ...selectedClient,
-        linkedFacultyIds: selectedClient.linkedFacultyIds?.filter(fid => fid !== id)
-      });
-    }
+    setSelectedClient(prev => {
+      if (prev?.linkedFacultyIds?.includes(id)) {
+        return {
+          ...prev,
+          linkedFacultyIds: prev.linkedFacultyIds.filter(fid => fid !== id)
+        };
+      }
+      return prev;
+    });
   };
 
   const linkFacultyToClient = (facultyId: string, clientId: string) => {
@@ -224,7 +230,7 @@ function App() {
     }));
 
     // 2. Update Client Record
-    const updatedClients = clients.map(c => {
+    setClients(prev => prev.map(c => {
       if (c.id === clientId) {
         const currentLinks = c.linkedFacultyIds || [];
         if (!currentLinks.includes(facultyId)) {
@@ -232,16 +238,18 @@ function App() {
         }
       }
       return c;
-    });
-    setClients(updatedClients);
+    }));
 
     // Update selected client if needed
-    if (selectedClient?.id === clientId) {
-      const currentLinks = selectedClient.linkedFacultyIds || [];
-      if (!currentLinks.includes(facultyId)) {
-        setSelectedClient({ ...selectedClient, linkedFacultyIds: [...currentLinks, facultyId] });
+    setSelectedClient(prev => {
+      if (prev?.id === clientId) {
+        const currentLinks = prev.linkedFacultyIds || [];
+        if (!currentLinks.includes(facultyId)) {
+          return { ...prev, linkedFacultyIds: [...currentLinks, facultyId] };
+        }
       }
-    }
+      return prev;
+    });
   };
 
   const unlinkFacultyFromClient = (facultyId: string, clientId: string) => {
@@ -254,21 +262,23 @@ function App() {
     }));
 
     // 2. Update Client Record
-    const updatedClients = clients.map(c => {
+    setClients(prev => prev.map(c => {
       if (c.id === clientId) {
         return { ...c, linkedFacultyIds: (c.linkedFacultyIds || []).filter(fid => fid !== facultyId) };
       }
       return c;
-    });
-    setClients(updatedClients);
+    }));
 
     // Update selected client if needed
-    if (selectedClient?.id === clientId) {
-      setSelectedClient({
-        ...selectedClient,
-        linkedFacultyIds: (selectedClient.linkedFacultyIds || []).filter(fid => fid !== facultyId)
-      });
-    }
+    setSelectedClient(prev => {
+      if (prev?.id === clientId) {
+        return {
+          ...prev,
+          linkedFacultyIds: (prev.linkedFacultyIds || []).filter(fid => fid !== facultyId)
+        };
+      }
+      return prev;
+    });
   };
 
   const saveDocument = (clientId: string, document: { id?: string; title: string; type: string; content: string }) => {
@@ -360,7 +370,6 @@ function App() {
           facultyDatabase={facultyDatabase}
           onLinkFacultyToClient={linkFacultyToClient}
           onUnlinkFacultyFromClient={unlinkFacultyFromClient}
-          onTabChange={setActiveTab}
         />
       );
     }
