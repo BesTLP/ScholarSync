@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Schema, Chat } from "@google/genai";
-import { FacultyMember, ImageSize, TargetOption } from "../types";
+import { FacultyMember, ImageSize, TargetOption, Client } from "../types";
 
 // Initialize the client
 const getClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -370,160 +370,322 @@ export const getFastResponse = async (query: string): Promise<string> => {
   return response.text || "";
 };
 
-export const generatePSOutline = async (params: {
+export async function generatePSOutline(params: {
   studentName: string;
   targetUni: string;
   degree: string;
   major: string;
   outlineCount: number;
   instructions?: string;
-  studentProfile?: any;
-}) => {
+  studentProfile?: Client;
+}): Promise<string[]> {
   const ai = getClient();
-  const prompt = `
-    You are an expert college admissions consultant. 
-    Generate a detailed Personal Statement (PS) outline for the following student:
-    Name: ${params.studentName}
-    Target University: ${params.targetUni}
-    Degree: ${params.degree}
-    Major: ${params.major}
-    Number of Paragraphs: ${params.outlineCount}
-    Additional Instructions: ${params.instructions || 'None'}
-    Student Profile: ${JSON.stringify(params.studentProfile || {})}
+  const { studentName, targetUni, degree, major, outlineCount, instructions, studentProfile } = params;
 
-    The outline should be professional, compelling, and tailored to the target university and major.
-    Each paragraph outline should be a concise description of what the paragraph will cover.
-    Return the result as a JSON array of strings, where each string is a paragraph outline.
+  const profileContext = studentProfile ? `
+    Student Profile:
+    - GPA: ${studentProfile.gpa || 'N/A'}
+    - Research: ${studentProfile.researchPapers?.map(p => p.title).join('; ') || 'N/A'}
+    - Work Experience: ${studentProfile.works?.map(w => `${w.position} at ${w.company}`).join('; ') || 'N/A'}
+    - Awards: ${studentProfile.awards?.map(a => a.name).join('; ') || 'N/A'}
+    - Interests: ${studentProfile.interests || 'N/A'}
+  ` : '';
+
+  const prompt = `
+    You are a top-tier admissions consultant who has helped hundreds of students get into Top 30 universities.
+    Create a detailed Personal Statement outline for ${studentName}, applying to ${targetUni} for a ${degree} in ${major}.
+    
+    The outline must follow this structure:
+    1. Hook: An engaging personal story or scene that grabs attention.
+    2. Academic Origin: How the interest in ${major} developed.
+    3. Key Experiences: Specific research, internships, or projects with details.
+    4. Why ${targetUni}: Specific fit with the school's curriculum, professors, or culture.
+    5. Future Goals & Conclusion: Career aspirations and a strong closing.
+
+    ${profileContext}
+    
+    Requirements:
+    - Generate exactly ${outlineCount} paragraphs.
+    - For each paragraph, provide specific writing direction and key points to cover, not just vague descriptions.
+    - ${instructions ? `Custom Instructions: ${instructions}` : ''}
+    - Output must read as authentically human-written. Vary sentence length and structure. Use occasional colloquial expressions where appropriate. Avoid overly polished or formulaic transitions. Include specific, personal details unique to this applicant.
+    
+    Return ONLY a JSON array of strings, where each string is the description for one paragraph.
+    Example: ["Para 1: Start with...", "Para 2: Discuss..."]
   `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING }
-      }
-    }
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: { responseMimeType: 'application/json' }
+    });
+    
+    const text = response.text;
+    if (!text) return [];
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("Error generating PS outline:", error);
+    return Array(outlineCount).fill("Failed to generate outline paragraph.");
+  }
+}
 
-  return JSON.parse(response.text || "[]");
-};
-
-export const generatePSContent = async (params: {
+export async function generatePSContent(params: {
   studentName: string;
   targetUni: string;
   degree: string;
   major: string;
   outlines: string[];
   instructions?: string;
-}) => {
+  studentProfile?: Client;
+}): Promise<string> {
   const ai = getClient();
-  const prompt = `
-    You are an expert college admissions consultant. 
-    Write a full Personal Statement (PS) based on the following outlines:
-    Name: ${params.studentName}
-    Target University: ${params.targetUni}
-    Degree: ${params.degree}
-    Major: ${params.major}
-    Outlines: ${params.outlines.join('\n')}
-    Additional Instructions: ${params.instructions || 'None'}
+  const { studentName, targetUni, degree, major, outlines, instructions, studentProfile } = params;
 
-    The PS should be written in the first person, sounding natural, authentic, and highly persuasive.
-    Use a professional yet personal tone.
-    Ensure smooth transitions between paragraphs.
+  const profileContext = studentProfile ? `
+    Student Profile:
+    - GPA: ${studentProfile.gpa || 'N/A'}
+    - Research: ${studentProfile.researchPapers?.map(p => p.title).join('; ') || 'N/A'}
+    - Work Experience: ${studentProfile.works?.map(w => `${w.position} at ${w.company}`).join('; ') || 'N/A'}
+    - Awards: ${studentProfile.awards?.map(a => a.name).join('; ') || 'N/A'}
+    - Skills: ${studentProfile.skillsAndQualities || 'N/A'}
+  ` : '';
+
+  const prompt = `
+    Write a full Personal Statement for ${studentName}, applying to ${targetUni} for a ${degree} in ${major}.
+    
+    Strictly follow this outline:
+    ${outlines.map((line, i) => `Paragraph ${i + 1}: ${line}`).join('\n')}
+
+    ${profileContext}
+
+    Requirements:
+    - Write 150-250 words per paragraph.
+    - "Show, don't tell": Use specific scenes, actions, and details instead of empty adjectives.
+    - Tone: Natural, personal, authentic. Avoid AI clichés like "passionate about", "I have always been fascinated", "In today's rapidly evolving world", "delve into", "tapestry".
+    - Ensure the conclusion calls back to the hook in the introduction.
+    - ${instructions ? `Custom Instructions: ${instructions}` : ''}
+    - Output must read as authentically human-written. Vary sentence length and structure. Use occasional colloquial expressions where appropriate. Avoid overly polished or formulaic transitions. Include specific, personal details unique to this applicant.
+    
+    Return the full essay text.
   `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }]
+    });
+    return response.text || '';
+  } catch (error) {
+    console.error("Error generating PS content:", error);
+    return "Failed to generate content.";
+  }
+}
 
-  return response.text;
-};
-
-export const generateEssay = async (params: {
+export async function generateEssay(params: {
   studentName: string;
+  promptText: string;
+  wordCount: number;
+  studentProfile?: Client;
   targetUni?: string;
-  prompt: string;
   focusPoints?: string;
-  length: number;
-  studentProfile?: any;
-}) => {
+}): Promise<string> {
   const ai = getClient();
-  const prompt = `
-    You are an expert college admissions consultant. 
-    Write a supplemental essay for the following student:
-    Name: ${params.studentName}
-    Target University: ${params.targetUni || 'Not specified'}
-    Essay Prompt: ${params.prompt}
-    Focus Points: ${params.focusPoints || 'None'}
-    Target Length: ${params.length} words
-    Student Profile: ${JSON.stringify(params.studentProfile || {})}
+  const { studentName, promptText, wordCount, studentProfile, targetUni, focusPoints } = params;
 
-    The essay should be authentic, insightful, and directly address the prompt.
-    Ensure it reflects the student's unique voice and strengths.
+  const profileContext = studentProfile ? `
+    Student Profile:
+    - Experiences: ${studentProfile.experiencesAndChallenges || 'N/A'}
+    - Activities: ${studentProfile.extracurriculars || 'N/A'}
+    - Growth: ${studentProfile.growthAndDevelopment || 'N/A'}
+  ` : '';
+
+  const prompt = `
+    Write an admissions essay for ${studentName} based on this prompt: "${promptText}".
+    
+    Target University: ${targetUni || 'General Application'}
+    Focus Points: ${focusPoints || 'None provided'}
+
+    Strategy:
+    1. Analyze the core values the prompt is testing (e.g., leadership, resilience, creativity).
+    2. Extract the most matching material from the student's profile.
+    3. Write a sincere, personal narrative. Avoid preaching or generalizations.
+    
+    ${profileContext}
+
+    Requirements:
+    - Word count: Strictly within ${wordCount * 0.9} to ${wordCount * 1.1} words.
+    - Tone: Authentic, reflective, human.
+    - Output must read as authentically human-written. Vary sentence length and structure. Use occasional colloquial expressions where appropriate. Avoid overly polished or formulaic transitions. Include specific, personal details unique to this applicant.
+
+    Return the essay text.
   `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }]
+    });
+    return response.text || '';
+  } catch (error) {
+    console.error("Error generating essay:", error);
+    return "Failed to generate essay.";
+  }
+}
 
-  return response.text;
-};
-
-export const generateLOR = async (params: {
+export async function generateLOR(params: {
   studentName: string;
   recommenderName: string;
   recommenderTitle: string;
   relationship: string;
-  targetUni: string;
-  major: string;
+  studentProfile?: Client;
+  targetUni?: string;
+  major?: string;
   focusPoints?: string;
-  studentProfile?: any;
-}) => {
+}): Promise<string> {
   const ai = getClient();
-  const prompt = `
-    You are writing a Letter of Recommendation (LOR) for a student.
-    Student Name: ${params.studentName}
-    Recommender Name: ${params.recommenderName}
-    Recommender Title: ${params.recommenderTitle}
-    Relationship: ${params.relationship}
-    Target University: ${params.targetUni}
-    Major: ${params.major}
-    Focus Points: ${params.focusPoints || 'None'}
-    Student Profile: ${JSON.stringify(params.studentProfile || {})}
+  const { studentName, recommenderName, recommenderTitle, relationship, studentProfile, targetUni, major, focusPoints } = params;
 
-    The letter should be professional, specific, and highlight the student's academic and personal strengths.
-    Use a formal tone suitable for university admissions.
+  const profileContext = studentProfile ? `
+    Student Profile:
+    - Research/Work with recommender: ${studentProfile.researchPapers?.map(p => p.title).join('; ') || 'N/A'}
+    - Key Skills: ${studentProfile.skillsAndQualities || 'N/A'}
+  ` : '';
+
+  const prompt = `
+    Write a Letter of Recommendation for ${studentName}.
+    
+    Target University: ${targetUni || 'General Application'}
+    Target Major: ${major || 'General'}
+    Focus Points: ${focusPoints || 'None provided'}
+    
+    Recommender Info:
+    - Name: ${recommenderName}
+    - Title: ${recommenderTitle}
+    - Relationship: ${relationship} (Adjust perspective accordingly: Professor focuses on academic potential, Employer on work ethic, etc.)
+
+    ${profileContext}
+
+    Requirements:
+    - Include 2-3 specific anecdotes or examples to support the praise.
+    - Tone: Professional yet personal, matching the recommender's identity.
+    - Format: Complete letter with date, salutation, and signature block.
+    - Output must read as authentically human-written. Vary sentence length and structure. Use occasional colloquial expressions where appropriate. Avoid overly polished or formulaic transitions. Include specific, personal details unique to this applicant.
+
+    Return the full letter text.
   `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }]
+    });
+    return response.text || '';
+  } catch (error) {
+    console.error("Error generating LOR:", error);
+    return "Failed to generate LOR.";
+  }
+}
 
-  return response.text;
-};
-
-export const generateCV = async (params: {
+export async function generateCV(params: {
   studentName: string;
-  studentProfile: any;
+  studentProfile?: Client;
   instructions?: string;
-}) => {
+}): Promise<string> {
+  const ai = getClient();
+  const { studentName, studentProfile, instructions } = params;
+
+  const profileContext = studentProfile ? JSON.stringify(studentProfile, null, 2) : '';
+
+  const prompt = `
+    Create a professional CV for ${studentName}.
+    
+    Student Data:
+    ${profileContext}
+
+    Requirements:
+    - Format: Structured plain text (use indentation, uppercase headers, and divider lines like '---' to organize). OR Markdown if requested.
+    - Focus: Adjust based on target (Academic vs Industry).
+    - Action Verbs: Start every bullet point with a strong action verb.
+    - Include all relevant sections: Education, Experience, Research, Skills, Awards.
+    - ${instructions ? `Custom Instructions: ${instructions}` : ''}
+    - Output must read as authentically human-written. Vary sentence length and structure. Use occasional colloquial expressions where appropriate. Avoid overly polished or formulaic transitions. Include specific, personal details unique to this applicant.
+
+    Return the CV text.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }]
+    });
+    return response.text || '';
+  } catch (error) {
+    console.error("Error generating CV:", error);
+    return "Failed to generate CV.";
+  }
+}
+
+export async function parseResumeContent(fileContent: string): Promise<Partial<Client>> {
   const ai = getClient();
   const prompt = `
-    You are an expert career coach. 
-    Generate a professional CV/Resume for the following student:
-    Name: ${params.studentName}
-    Student Profile: ${JSON.stringify(params.studentProfile)}
-    Additional Instructions: ${params.instructions || 'None'}
+    You are a professional resume parser. Extract structured information from the following resume/CV text.
+    
+    Text:
+    ${fileContent.substring(0, 20000)} // Limit context window if needed
 
-    Format the CV clearly with sections for Education, Experience, Awards, Skills, etc.
-    Use action verbs and quantify achievements where possible.
-    Return the result as a well-formatted Markdown string.
+    Return a JSON object with these fields (if found):
+    {
+      "name": string,
+      "gpa": string,
+      "educations": [{ "school": string, "degree": string, "major": string, "startDate": string, "endDate": string, "gpa": string }],
+      "works": [{ "company": string, "position": string, "startDate": string, "endDate": string, "description": string }],
+      "awards": [{ "name": string, "date": string, "description": string }],
+      "skillsAndQualities": string,
+      "academicAchievements": string,
+      "extracurriculars": string,
+      "careerAspirations": string,
+      "contacts": [{ "type": "email" | "phone" | "address", "value": string }]
+    }
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: { responseMimeType: 'application/json' }
+    });
+    
+    const text = response.text;
+    if (!text) return {};
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("Error parsing resume:", error);
+    return {};
+  }
+}
+
+export const generateProfileAnalysis = async (client: Client): Promise<string> => {
+  const ai = getClient();
+  const prompt = `
+    You are an expert education consultant.
+    Analyze the following student profile and provide personalized background enhancement suggestions.
+    
+    Student Profile:
+    Name: ${client.name}
+    GPA: ${client.gpa || 'N/A'}
+    Education: ${JSON.stringify(client.educations || [])}
+    Work Experience: ${JSON.stringify(client.works || [])}
+    Awards: ${JSON.stringify(client.awards || [])}
+    Research Papers: ${JSON.stringify(client.researchPapers || [])}
+    
+    Please provide:
+    1. A brief analysis of the student's current strengths and weaknesses.
+    2. Specific suggestions for background improvement (e.g., research, internships, skills).
+    3. Recommended timeline for the next steps.
+    
+    Output Language: Simplified Chinese.
+    Format: Markdown.
   `;
 
   const response = await ai.models.generateContent({
@@ -531,5 +693,265 @@ export const generateCV = async (params: {
     contents: prompt,
   });
 
-  return response.text;
+  return response.text || "无法生成分析建议。";
 };
+
+export const parseClientFile = async (fileData: string, mimeType: string = 'text/plain'): Promise<Partial<Client>> => {
+  const ai = getClient();
+  
+  let contents: any;
+
+  if (mimeType.startsWith('text/')) {
+    // For text files, we can just embed the text
+    // Note: fileData might be base64 encoded if it came from FileReader as data URL
+    // If it is a data URL, we need to strip the prefix and decode it, OR just use the inlineData if the model supports it.
+    // However, for text, it's safer to decode if it's base64.
+    
+    let textContent = fileData;
+    if (fileData.includes('base64,')) {
+        try {
+            textContent = atob(fileData.split('base64,')[1]);
+        } catch (e) {
+            console.warn("Failed to decode base64 text, using raw data", e);
+        }
+    }
+
+    const prompt = `
+      Extract student information from the following resume/document content and return it as a JSON object matching the Client interface structure.
+      
+      Document Content:
+      """
+      ${textContent}
+      """
+      
+      Output JSON Structure:
+      {
+        "name": "Student Name",
+        "gpa": "3.8/4.0",
+        "advisor": "Advisor Name (if any)",
+        "contact": "Phone/Email",
+        "educations": [
+          { "school": "...", "degree": "...", "major": "...", "gpa": "...", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD" }
+        ],
+        "works": [
+          { "company": "...", "position": "...", "startDate": "...", "endDate": "...", "description": "..." }
+        ],
+        "awards": [
+          { "name": "...", "level": "...", "date": "...", "description": "..." }
+        ],
+        "researchPapers": [
+          { "title": "...", "journal": "...", "date": "...", "link": "..." }
+        ],
+        "skillsAndQualities": "...",
+        "interests": "..."
+      }
+      
+      If a field is not found, omit it or use empty strings.
+      Dates should be in YYYY-MM-DD format if possible.
+    `;
+    
+    contents = prompt;
+
+  } else {
+    // For PDF, Images, etc., use inlineData
+    // fileData should be the base64 string (without the data:mime/type;base64, prefix if possible, or we strip it)
+    const base64Data = fileData.includes('base64,') ? fileData.split('base64,')[1] : fileData;
+
+    contents = {
+      parts: [
+        {
+          inlineData: {
+            mimeType: mimeType,
+            data: base64Data
+          }
+        },
+        {
+          text: `Extract student information from the provided document and return it as a JSON object matching the Client interface structure.
+          
+          Output JSON Structure:
+          {
+            "name": "Student Name",
+            "gpa": "3.8/4.0",
+            "advisor": "Advisor Name (if any)",
+            "contact": "Phone/Email",
+            "educations": [
+              { "school": "...", "degree": "...", "major": "...", "gpa": "...", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD" }
+            ],
+            "works": [
+              { "company": "...", "position": "...", "startDate": "...", "endDate": "...", "description": "..." }
+            ],
+            "awards": [
+              { "name": "...", "level": "...", "date": "...", "description": "..." }
+            ],
+            "researchPapers": [
+              { "title": "...", "journal": "...", "date": "...", "link": "..." }
+            ],
+            "skillsAndQualities": "...",
+            "interests": "..."
+          }
+          
+          If a field is not found, omit it or use empty strings.
+          Dates should be in YYYY-MM-DD format if possible.`
+        }
+      ]
+    };
+  }
+
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash", // Use 2.5 Flash for multimodal support
+    contents: contents,
+    config: {
+      responseMimeType: "application/json"
+    }
+  });
+
+  try {
+    return JSON.parse(response.text || "{}");
+  } catch (e) {
+    console.error("Failed to parse client file:", e);
+    return {};
+  }
+};
+
+export const searchFacultyByWeb = async (query: string): Promise<FacultyMember[]> => {
+  const ai = getClient();
+  
+  const prompt = `
+    Task: Search for faculty members based on the query: "${query}".
+    
+    Instructions:
+    1. Use Google Search to find official faculty profiles, university directories, or academic pages.
+    2. Extract detailed information for each faculty member found.
+    3. **CRITICAL**: You must find the **Official University Profile Page** and use it as the \`profileUrl\`.
+    4. **CRITICAL**: You must find the **Official Email** address.
+    5. **CRITICAL**: You must find **Recent Academic Activities** (papers, projects) from 2020-2025.
+    
+    Output Format: JSON Array of FacultyMember objects.
+    
+    Schema:
+    {
+      "name": "Name",
+      "title": "Title (e.g., Professor, Associate Professor)",
+      "university": "University Name",
+      "department": "Department Name",
+      "email": "Email Address",
+      "profileUrl": "Official Profile URL",
+      "photoUrl": "Photo URL (optional)",
+      "researchAreas": ["Area 1", "Area 2"],
+      "recentActivities": ["Activity 1", "Activity 2"],
+      "activitySummary": "Brief summary of recent work",
+      "isActive": true/false (based on recent activity or "Emeritus" status),
+      "matchScore": 0 (default),
+      "alignmentDetails": "Brief description of their research focus",
+      "matchReasoning": {
+         "locationCheck": "Location",
+         "universityCheck": "University",
+         "departmentCheck": "Department",
+         "positionCheck": "Position",
+         "activityCheck": "Activity Level",
+         "reputationCheck": "Reputation",
+         "researchFit": "Research Focus"
+      }
+    }
+    
+    Return ONLY valid JSON.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        tools: [{ googleSearch: {} }]
+      }
+    });
+
+    const text = response.text;
+    if (!text) return [];
+    return JSON.parse(text) as FacultyMember[];
+  } catch (error) {
+    console.error("Web search for faculty failed:", error);
+    return [];
+  }
+};
+
+export const searchUniversityInfo = async (university: string, department?: string): Promise<any> => {
+  const ai = getClient();
+  const prompt = `
+    Task: Find detailed admission and program information for:
+    University: ${university}
+    Department/Program: ${department || "General"}
+    
+    Instructions:
+    1. Search for the **Official Graduate Admission Page** for this specific program.
+    2. Extract the following data points with their source URLs.
+    
+    Output Schema (JSON):
+    {
+      "university": "Full Name",
+      "qsRanking": "World Ranking",
+      "website": "Official URL",
+      "tuition": { "value": "Amount per year", "sourceUrl": "..." },
+      "deadline": { "value": "Next deadline date", "sourceUrl": "..." },
+      "requirements": { "value": "GPA, GRE, English scores", "sourceUrl": "..." },
+      "scholarships": { "value": "Available funding types", "sourceUrl": "..." },
+      "programs": ["Program A", "Program B"]
+    }
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        tools: [{ googleSearch: {} }]
+      }
+    });
+
+    const text = response.text;
+    if (!text) return null;
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("University search failed:", error);
+    return null;
+  }
+};
+
+export const refreshFacultyData = async (existing: FacultyMember): Promise<FacultyMember> => {
+  const ai = getClient();
+  const prompt = `
+    Task: Update and verify information for this faculty member:
+    Name: ${existing.name}
+    University: ${existing.university}
+    Current Data: ${JSON.stringify(existing)}
+    
+    Instructions:
+    1. Search for the latest official profile.
+    2. Update **Recent Activities** (2024-2025 focus).
+    3. Verify **Email** and **Title**.
+    4. Check if they are still active at this university.
+    
+    Output: Return the updated FacultyMember JSON object. Keep existing data if no new info found, but update 'updatedAt' implicitly by returning fresh data.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        tools: [{ googleSearch: {} }]
+      }
+    });
+
+    const text = response.text;
+    if (!text) return existing;
+    return JSON.parse(text) as FacultyMember;
+  } catch (error) {
+    console.error("Faculty refresh failed:", error);
+    return existing;
+  }
+};
+

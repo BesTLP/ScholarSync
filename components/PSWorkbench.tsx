@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   GraduationCap, 
   BookOpen, 
@@ -12,10 +12,17 @@ import {
   Search as SearchIcon,
   ChevronDown,
   ArrowRight,
-  Loader2
+  Loader2,
+  Save,
+  Download,
+  Copy,
+  Undo2,
+  Redo2,
+  X
 } from 'lucide-react';
 import { Client } from '../types';
 import { generatePSOutline, generatePSContent } from '../services/geminiService';
+import EditorWorkspace, { TopToolbar, EditorFooter, FloatingAIButtons } from './EditorWorkspace';
 
 // --- Sub-components ---
 
@@ -228,7 +235,7 @@ const OutlineEditor: React.FC<OutlineEditorProps> = ({ paragraphs, setParagraphs
       {/* Top Nav */}
       <div className="h-14 bg-white border-b border-gray-100 px-8 flex items-center justify-between shrink-0">
         <div className="flex items-center space-x-2 text-xs font-medium">
-          <span className="text-gray-400">EduPro</span>
+          <span className="text-gray-400">留学咩</span>
           <ChevronRight size={12} className="text-gray-300" />
           <span className="text-gray-900 font-bold">写PS</span>
         </div>
@@ -318,10 +325,11 @@ interface PSWorkbenchProps {
   onSaveDocument: (clientId: string, document: { id?: string; title: string; type: string; content: string }) => string | undefined;
   initialDocument?: { id: string; content: string; title: string };
   onBack: () => void;
+  initialClientId?: string;
 }
 
-const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, onSaveDocument, initialDocument, onBack }) => {
-  const [selectedClientId, setSelectedClientId] = useState('');
+const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, onSaveDocument, initialDocument, onBack, initialClientId }) => {
+  const [selectedClientId, setSelectedClientId] = useState(initialClientId || '');
   const [targetUni, setTargetUni] = useState('');
   const [degree, setDegree] = useState('Master');
   const [major, setMajor] = useState('Computer Science');
@@ -340,11 +348,22 @@ const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, on
   const [currentDocId, setCurrentDocId] = useState<string | undefined>(initialDocument?.id);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  
+  // Save Modal State
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [documentTitle, setDocumentTitle] = useState('');
+
+  useEffect(() => {
+    if (initialClientId) {
+      setSelectedClientId(initialClientId);
+    }
+  }, [initialClientId]);
 
   useEffect(() => {
     if (initialDocument) {
       setGeneratedContent(initialDocument.content);
       setCurrentDocId(initialDocument.id);
+      setDocumentTitle(initialDocument.title);
     }
   }, [initialDocument]);
 
@@ -381,9 +400,14 @@ const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, on
         degree,
         major,
         outlines: paragraphs.map(p => p.text),
-        instructions
+        instructions,
+        studentProfile: client
       });
       setGeneratedContent(content || '');
+      // Set default title if not set
+      if (!documentTitle) {
+        setDocumentTitle(`Personal Statement - ${targetUni || 'General'}`);
+      }
     } catch (error) {
       console.error('Failed to generate content:', error);
     } finally {
@@ -391,12 +415,16 @@ const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, on
     }
   };
 
-  const handleSaveToProfile = () => {
+  const handleSaveClick = () => {
     if (!selectedClientId || !generatedContent) return;
+    setShowSaveModal(true);
+  };
+
+  const handleConfirmSave = () => {
     setIsSaving(true);
     const docId = onSaveDocument(selectedClientId, {
       id: currentDocId,
-      title: `Personal Statement - ${targetUni || 'General'}`,
+      title: documentTitle || `Personal Statement - ${targetUni || 'General'}`,
       type: 'PS',
       content: generatedContent
     });
@@ -405,30 +433,79 @@ const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, on
     
     setIsSaving(false);
     setSaveSuccess(true);
+    setShowSaveModal(false);
     setTimeout(() => setSaveSuccess(false), 3000);
+  };
+
+  const handleRegenerate = () => {
+    if (confirm('重新生成将覆盖当前内容，确定要继续吗？')) {
+      handleGenerateContent();
+    }
   };
 
   if (generatedContent) {
     return (
-      <div className="flex flex-col h-screen bg-white overflow-hidden">
+      <div className="flex flex-col h-screen bg-white overflow-hidden relative">
+        {/* Save Modal */}
+        {showSaveModal && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowSaveModal(false)} />
+            <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl p-6 animate-in fade-in zoom-in duration-200">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-900">保存文书</h3>
+                <button onClick={() => setShowSaveModal(false)} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">文档标题</label>
+                  <input 
+                    type="text" 
+                    value={documentTitle}
+                    onChange={(e) => setDocumentTitle(e.target.value)}
+                    className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-cyan-500"
+                    placeholder="输入文档标题..."
+                    autoFocus
+                  />
+                </div>
+                <div className="flex justify-end space-x-3 pt-2">
+                  <button 
+                    onClick={() => setShowSaveModal(false)}
+                    className="px-4 py-2 text-gray-500 font-bold text-sm hover:bg-gray-50 rounded-xl transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button 
+                    onClick={handleConfirmSave}
+                    className="px-6 py-2 bg-cyan-500 text-white font-bold text-sm rounded-xl hover:bg-cyan-600 shadow-lg shadow-cyan-100 transition-all"
+                  >
+                    确认保存
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="h-14 border-b border-gray-100 px-8 flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-2 text-xs font-medium">
-            <span className="text-gray-400">EduPro</span>
+            <span className="text-gray-400">留学咩</span>
             <ChevronRight size={12} className="text-gray-300" />
-            <span className="text-gray-900 font-bold">PS 正文预览</span>
+            <span className="text-gray-900 font-bold">PS 正文编辑</span>
           </div>
           <div className="flex items-center space-x-3">
+            {saveSuccess && (
+              <div className="flex items-center text-emerald-500 text-xs font-bold mr-2 animate-in fade-in duration-300">
+                <Sparkles size={14} className="mr-1" />
+                保存成功
+              </div>
+            )}
             <button 
-              onClick={handleSaveToProfile}
-              disabled={isSaving}
-              className={`flex items-center px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm ${
-                saveSuccess 
-                  ? 'bg-emerald-500 text-white' 
-                  : 'bg-cyan-500 text-white hover:bg-cyan-600'
-              }`}
+              onClick={onBack}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-xs font-bold hover:bg-gray-200 transition-all"
             >
-              {isSaving ? <Loader2 size={14} className="mr-2 animate-spin" /> : saveSuccess ? <Sparkles size={14} className="mr-2" /> : null}
-              {saveSuccess ? '保存成功' : '保存至档案'}
+              返回客户详情
             </button>
             <button 
               onClick={() => {
@@ -441,10 +518,23 @@ const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, on
             </button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-12 custom-scrollbar">
-          <div className="max-w-3xl mx-auto bg-white rounded-2xl p-10 shadow-sm border border-gray-100 min-h-full whitespace-pre-wrap leading-relaxed text-gray-800">
-            {generatedContent}
-          </div>
+
+        <EditorWorkspace 
+          value={generatedContent} 
+          onChange={setGeneratedContent}
+          onSave={handleSaveClick}
+          saveSuccess={saveSuccess}
+        />
+        
+        {/* Custom Toolbar Actions for PS (Regenerate) */}
+        <div className="absolute top-[60px] right-8 flex space-x-2">
+           <button 
+            onClick={handleRegenerate}
+            className="flex items-center px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-all border border-indigo-100"
+          >
+            <Sparkles size={14} className="mr-1.5" />
+            重新生成
+          </button>
         </div>
       </div>
     );

@@ -10,20 +10,10 @@ import {
   Copy,
   Save,
   AlertTriangle,
-  CheckCircle2
+  CheckCircle2,
+  ChevronLeft
 } from 'lucide-react';
 import { Client } from '../types';
-
-// Mock documents for students
-const MOCK_DOCUMENTS: Record<string, { id: string; title: string; content: string }[]> = {
-  '1': [
-    { id: 'd1', title: '个人陈述 (PS) - 初稿', content: '这是段同学的个人陈述初稿内容...' },
-    { id: 'd2', title: '简历 (CV) - 2024版', content: '这是段同学的简历内容...' },
-  ],
-  '2': [
-    { id: 'd3', title: '斯坦福申请文书', content: '这是李同学的斯坦福申请文书内容...' },
-  ]
-};
 
 interface AIShieldSidebarProps {
   clients: Client[];
@@ -50,7 +40,7 @@ const AIShieldSidebar: React.FC<AIShieldSidebarProps> = ({
 
   const selectedClient = clients.find(c => c.id === selectedClientId);
   const filteredClients = clients.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
-  const availableDocs = selectedClientId ? MOCK_DOCUMENTS[selectedClientId] || [] : [];
+  const availableDocs = selectedClient?.documents || [];
 
   return (
     <div className="w-[320px] bg-white border-r border-gray-100 flex flex-col h-full overflow-y-auto custom-scrollbar">
@@ -178,22 +168,35 @@ const AIShieldSidebar: React.FC<AIShieldSidebarProps> = ({
   );
 };
 
-const AIShieldWorkbench: React.FC<{ clients: Client[] }> = ({ clients }) => {
-  const [selectedClientId, setSelectedClientId] = useState('');
+const AIShieldWorkbench: React.FC<{ 
+  clients: Client[];
+  onSaveDocument: (clientId: string, document: { id?: string; title: string; type: string; content: string }) => string | undefined;
+  onBack: () => void;
+  initialClientId?: string;
+}> = ({ clients, onSaveDocument, onBack, initialClientId }) => {
+  const [selectedClientId, setSelectedClientId] = useState(initialClientId || '');
   const [selectedDocId, setSelectedDocId] = useState('');
   const [processState, setProcessState] = useState<'idle' | 'processing' | 'success'>('idle');
   const [content, setContent] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    if (initialClientId) {
+      setSelectedClientId(initialClientId);
+    }
+  }, [initialClientId]);
 
   // Sync content when doc is selected
   useEffect(() => {
     if (selectedClientId && selectedDocId) {
-      const doc = MOCK_DOCUMENTS[selectedClientId]?.find(d => d.id === selectedDocId);
+      const client = clients.find(c => c.id === selectedClientId);
+      const doc = client?.documents?.find(d => d.id === selectedDocId);
       if (doc) setContent(doc.content);
     } else {
       setContent('');
     }
-  }, [selectedClientId, selectedDocId]);
+  }, [selectedClientId, selectedDocId, clients]);
 
   const handleStart = () => {
     setProcessState('processing');
@@ -204,17 +207,40 @@ const AIShieldWorkbench: React.FC<{ clients: Client[] }> = ({ clients }) => {
   };
 
   const handleSaveAsCopy = () => {
-    // Logic: Create a new document record for the student
-    console.log('Saving as new copy for student:', selectedClientId);
-    alert('已成功保存为新副本！');
-    reset();
+    if (!selectedClientId || !selectedDocId) return;
+    
+    const client = clients.find(c => c.id === selectedClientId);
+    const originalDoc = client?.documents?.find(d => d.id === selectedDocId);
+    
+    if (client && originalDoc) {
+      onSaveDocument(selectedClientId, {
+        title: `${originalDoc.title} (副本)`,
+        type: originalDoc.type,
+        content: content
+      });
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+      reset();
+    }
   };
 
   const handleOverwrite = () => {
-    // Logic: Update the existing document record
-    console.log('Overwriting original document:', selectedDocId);
-    alert('原文档已更新覆盖！');
-    reset();
+    if (!selectedClientId || !selectedDocId) return;
+
+    const client = clients.find(c => c.id === selectedClientId);
+    const originalDoc = client?.documents?.find(d => d.id === selectedDocId);
+
+    if (client && originalDoc) {
+      onSaveDocument(selectedClientId, {
+        id: selectedDocId,
+        title: originalDoc.title,
+        type: originalDoc.type,
+        content: content
+      });
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+      reset();
+    }
   };
 
   const reset = () => {
@@ -238,11 +264,25 @@ const AIShieldWorkbench: React.FC<{ clients: Client[] }> = ({ clients }) => {
         {/* Breadcrumbs Header */}
         <div className="h-14 border-b border-gray-100 bg-white flex items-center justify-between px-8 shrink-0">
           <div className="flex items-center space-x-2 text-xs font-medium">
-            <span className="text-gray-400">EduPro</span>
+            <button 
+              onClick={onBack}
+              className="p-1.5 hover:bg-gray-50 rounded-full text-gray-400 transition-colors mr-2"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-gray-400">留学咩</span>
             <ChevronRight size={12} className="text-gray-300" />
             <span className="text-gray-900 font-bold">降AI率</span>
           </div>
           <div className="flex items-center space-x-4">
+            {saveSuccess && (
+              <button 
+                onClick={onBack}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-xs font-bold hover:bg-gray-200 transition-all"
+              >
+                返回客户详情
+              </button>
+            )}
             <button className="p-2 text-gray-400 hover:text-gray-900 transition-colors">
               <Moon size={18} />
             </button>

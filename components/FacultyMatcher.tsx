@@ -1,9 +1,37 @@
-
-import React, { useState } from 'react';
-import { FacultyMember, TargetOption, SourceData } from '../types';
+import React, { useState, useEffect } from 'react';
+import { FacultyMember, TargetOption, SourceData, Client, FacultyRecord } from '../types';
 import { generateFacultyMatches, parseRequirementText } from '../services/geminiService';
+import FacultyCard from './FacultyCard';
+import { 
+  Search, 
+  Sparkles, 
+  Plus, 
+  Trash2, 
+  AlertCircle, 
+  FileSpreadsheet,
+  Loader2,
+  UserPlus,
+  Star,
+  User
+} from 'lucide-react';
 
-const FacultyMatcher: React.FC = () => {
+interface FacultyMatcherProps {
+  clients?: Client[];
+  selectedClient?: Client | null;
+  facultyDatabase?: FacultyRecord[];
+  onAddFacultyToDatabase?: (faculty: FacultyMember, country: string, fieldCategory: string) => string;
+  onLinkFacultyToClient?: (facultyId: string, clientId: string) => void;
+  onUpdateClient?: (client: Client) => void;
+}
+
+const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
+  clients = [],
+  selectedClient = null,
+  facultyDatabase = [],
+  onAddFacultyToDatabase,
+  onLinkFacultyToClient,
+  onUpdateClient
+}) => {
   // Smart Import State
   const [rawRequirementText, setRawRequirementText] = useState('');
   const [isParsing, setIsParsing] = useState(false);
@@ -34,6 +62,17 @@ const FacultyMatcher: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showManualInput, setShowManualInput] = useState(false);
+
+  // Client Selection State (Local override if needed, but primarily driven by props)
+  const [activeClientId, setActiveClientId] = useState<string>(selectedClient?.id || '');
+
+  // Effect to sync selected client to local state
+  useEffect(() => {
+    if (selectedClient) {
+      setActiveClientId(selectedClient.id);
+      // Optional: Pre-fill profile if client has one (assuming client object might have this data in future)
+    }
+  }, [selectedClient]);
 
   const handleSmartFill = async () => {
     if (!rawRequirementText.trim()) return;
@@ -184,52 +223,110 @@ const FacultyMatcher: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  // Helper component for checklist item in the report
-  const AuditItem = ({ label, value, icon }: { label: string, value: string, icon: React.ReactNode }) => (
-    <div className="flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors group">
-        <div className="flex-shrink-0 mt-0.5 text-slate-400 group-hover:text-blue-500 transition-colors">
-            {icon}
-        </div>
-        <div className="flex-1 min-w-0">
-            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">{label}</div>
-            <div className="text-sm text-slate-700 font-semibold leading-snug break-words">{value}</div>
-        </div>
-    </div>
-  );
-
-  // Regex to parse [Tag][Tag] Content
-  const parseActivity = (text: string) => {
-    // Matches one or more brackets at the start, including [2025][Type] or [2025] [Type]
-    // Group 1: The tags
-    // Group 2: The rest
-    const match = text.match(/^((?:\[[^\]]+\]\s*)+)(.*)/);
-    if (match) {
-        return { tags: match[1].trim(), content: match[2].trim() };
+  // Database Actions
+  const handleSaveToDatabase = (prof: FacultyMember) => {
+    if (onAddFacultyToDatabase) {
+      // Infer country from targets or default to 'Unknown'
+      // Ideally we should parse country from university or have AI return it
+      const country = targets.find(t => prof.university.includes(t.university) || t.region)?.region || '未分类';
+      const field = department || '未分类';
+      onAddFacultyToDatabase(prof, country, field);
+      // Could show toast here
     }
-    return { tags: '', content: text };
+  };
+
+  const handleLinkToClient = (prof: FacultyMember) => {
+    if (!activeClientId) {
+      alert("请先在左侧选择要关联的学生");
+      return;
+    }
+    if (onAddFacultyToDatabase && onLinkFacultyToClient) {
+      const country = targets.find(t => prof.university.includes(t.university) || t.region)?.region || '未分类';
+      const field = department || '未分类';
+      const facultyId = onAddFacultyToDatabase(prof, country, field);
+      onLinkFacultyToClient(facultyId, activeClientId);
+      // Could show toast here
+    }
+  };
+
+  const handleBatchSave = () => {
+    if (!results) return;
+    results.forEach(prof => handleSaveToDatabase(prof));
+    alert(`已将 ${results.length} 位导师保存到数据库`);
+  };
+
+  const handleBatchLink = () => {
+    if (!activeClientId) {
+       alert("请先在左侧选择要关联的学生");
+       return;
+    }
+    if (!results) return;
+    results.forEach(prof => handleLinkToClient(prof));
+    alert(`已将 ${results.length} 位导师推荐给当前学生`);
+  };
+
+  // Check if faculty is already in DB
+  const isFacultyInDB = (prof: FacultyMember) => {
+    return facultyDatabase?.some(f => 
+      f.name === prof.name && f.university === prof.university
+    );
+  };
+
+  // Check if faculty is linked to current client
+  const isFacultyLinked = (prof: FacultyMember) => {
+    if (!activeClientId) return false;
+    const record = facultyDatabase?.find(f => 
+      f.name === prof.name && f.university === prof.university
+    );
+    return record?.linkedClientIds?.includes(activeClientId);
   };
 
   return (
-    <div className="space-y-8 animate-fade-in">
-      <div className="text-center max-w-2xl mx-auto mb-10">
-        <h2 className="text-3xl font-bold text-gray-900 mb-3">学术导师智能检索</h2>
-        <p className="text-gray-500">
-          根据您的研究兴趣，为您量化评估并推荐最佳导师。
-        </p>
-      </div>
+    <div className="flex h-screen bg-gray-50 overflow-hidden">
+      {/* Left Sidebar: Input Form */}
+      <div className="w-[400px] bg-white border-r border-gray-100 flex flex-col h-full overflow-y-auto custom-scrollbar shrink-0 z-10 shadow-sm">
+        <div className="p-6 border-b border-gray-100 bg-white sticky top-0 z-20">
+           <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+             <Search className="w-5 h-5 text-blue-600" />
+             学术导师智能检索
+           </h2>
+           <p className="text-xs text-gray-500 mt-1">
+             根据您的研究兴趣，为您量化评估并推荐最佳导师。
+           </p>
+        </div>
+        
+        <div className="p-6 space-y-6">
+            {/* Client Selector */}
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                <label className="block text-xs font-bold text-blue-800 uppercase tracking-wider mb-2">
+                    当前服务学生 (可选)
+                </label>
+                <select 
+                    value={activeClientId}
+                    onChange={(e) => setActiveClientId(e.target.value)}
+                    className="w-full p-2 bg-white border border-blue-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none text-blue-900"
+                >
+                    <option value="">-- 未选择 (仅检索) --</option>
+                    {clients.map(client => (
+                        <option key={client.id} value={client.id}>{client.name}</option>
+                    ))}
+                </select>
+                {activeClientId && (
+                    <p className="text-xs text-blue-600 mt-2 flex items-center gap-1">
+                        <User size={12} />
+                        将自动关联推荐结果到此学生档案
+                    </p>
+                )}
+            </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Input Form */}
-        <div className="lg:col-span-4 space-y-6">
-            
-            {/* NEW: Smart Import Section */}
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-5 rounded-2xl border border-indigo-100 shadow-sm">
+            {/* Smart Import Section */}
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-5 rounded-xl border border-indigo-100 shadow-sm">
                 <div 
                     className="flex justify-between items-center cursor-pointer mb-2"
                     onClick={() => setShowSmartFill(!showSmartFill)}
                 >
                     <h3 className="text-sm font-bold text-indigo-900 flex items-center gap-2">
-                        <span>📋</span> 智能导入需求文本
+                        <Sparkles size={14} /> 智能导入需求文本
                     </h3>
                     <span className="text-indigo-400 text-xs">{showSmartFill ? '收起' : '展开'}</span>
                 </div>
@@ -257,18 +354,16 @@ const FacultyMatcher: React.FC = () => {
                 )}
             </div>
 
-            {/* Section 1: Target Info (Dynamic) */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-shadow">
-                <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
-                <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-bold">1</span>
+            {/* Section 1: Target Info */}
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 border-l-4 border-l-blue-500 relative overflow-hidden group hover:shadow-md transition-shadow">
+                <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">1</span>
                     目标定位 <span className="text-gray-400 text-xs font-normal">(可选)</span>
                 </h3>
                 
                 <div className="space-y-4">
                     <p className="text-xs text-gray-400 mb-2">添加多行以支持不同国家/地区的特定人数要求。</p>
                     
-                    {/* Dynamic Target Rows */}
                     {targets.map((target, index) => (
                         <div key={index} className="p-3 bg-gray-50 border border-gray-200 rounded-xl relative">
                              {targets.length > 1 && (
@@ -277,9 +372,7 @@ const FacultyMatcher: React.FC = () => {
                                     className="absolute -top-2 -right-2 bg-white text-gray-400 hover:text-red-500 rounded-full p-1 shadow border border-gray-200 z-10"
                                     title="删除此行"
                                 >
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                                        <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                                    </svg>
+                                    <Trash2 size={12} />
                                 </button>
                              )}
                              <div className="space-y-2">
@@ -289,7 +382,7 @@ const FacultyMatcher: React.FC = () => {
                                         <input 
                                             type="text"
                                             placeholder="如: 美国"
-                                            className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-indigo-500"
+                                            className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-blue-500"
                                             value={target.region}
                                             onChange={(e) => handleTargetChange(index, 'region', e.target.value)}
                                         />
@@ -300,7 +393,7 @@ const FacultyMatcher: React.FC = () => {
                                             type="number"
                                             min="1"
                                             max="20"
-                                            className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-indigo-500"
+                                            className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-blue-500"
                                             value={target.count}
                                             onChange={(e) => handleTargetChange(index, 'count', parseInt(e.target.value) || 5)}
                                         />
@@ -311,7 +404,7 @@ const FacultyMatcher: React.FC = () => {
                                     <input 
                                         type="text"
                                         placeholder="如: Top 50, Harvard..."
-                                        className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-indigo-500"
+                                        className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-blue-500"
                                         value={target.university}
                                         onChange={(e) => handleTargetChange(index, 'university', e.target.value)}
                                     />
@@ -322,9 +415,9 @@ const FacultyMatcher: React.FC = () => {
                     
                     <button 
                         onClick={handleAddTarget}
-                        className="w-full py-2 border-2 border-dashed border-gray-200 text-gray-500 rounded-xl text-xs font-bold hover:border-indigo-300 hover:text-indigo-600 transition-colors flex items-center justify-center gap-1"
+                        className="w-full py-2 border-2 border-dashed border-gray-200 text-gray-500 rounded-xl text-xs font-bold hover:border-blue-300 hover:text-blue-600 transition-colors flex items-center justify-center gap-1"
                     >
-                        <span>+</span> 添加目标区域
+                        <Plus size={14} /> 添加目标区域
                     </button>
 
                     <div className="pt-2 border-t border-gray-100">
@@ -333,7 +426,7 @@ const FacultyMatcher: React.FC = () => {
                             <input 
                                 type="text"
                                 placeholder="CS, EE..."
-                                className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm transition-all"
+                                className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm transition-all"
                                 value={department}
                                 onChange={(e) => setDepartment(e.target.value)}
                             />
@@ -343,7 +436,7 @@ const FacultyMatcher: React.FC = () => {
                             <input 
                                 type="text"
                                 placeholder="默认为【仅限正教授】。如需副教授请注明。"
-                                className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm transition-all"
+                                className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm transition-all"
                                 value={targetPosition}
                                 onChange={(e) => setTargetPosition(e.target.value)}
                             />
@@ -361,7 +454,7 @@ const FacultyMatcher: React.FC = () => {
                         <input 
                             type="text"
                             placeholder="https://..."
-                            className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm transition-all"
+                            className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm transition-all"
                             value={directoryUrl}
                             onChange={(e) => setDirectoryUrl(e.target.value)}
                         />
@@ -371,13 +464,13 @@ const FacultyMatcher: React.FC = () => {
                     <div>
                          <button 
                             onClick={() => setShowManualInput(!showManualInput)}
-                            className="text-xs text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1 mt-2 font-medium"
+                            className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 mt-2 font-medium"
                         >
                             {showManualInput ? '- 收起手动文本框' : '+ 网页无法读取？手动粘贴'}
                         </button>
                         {showManualInput && (
                             <textarea
-                                className="w-full h-32 mt-2 p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 text-xs shadow-inner"
+                                className="w-full h-32 mt-2 p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 text-xs shadow-inner"
                                 placeholder="在此处粘贴网页全文..."
                                 value={manualContent}
                                 onChange={(e) => setManualContent(e.target.value)}
@@ -387,11 +480,10 @@ const FacultyMatcher: React.FC = () => {
                 </div>
             </div>
 
-             {/* Section 2: Student Profile (Required) */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-shadow">
-                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
-                <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">2</span>
+            {/* Section 2: Student Profile (Required) */}
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 border-l-4 border-l-blue-500 relative overflow-hidden group hover:shadow-md transition-shadow">
+                <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">2</span>
                     个人背景 <span className="text-red-500 text-xs">*</span>
                 </h3>
                 <textarea
@@ -402,11 +494,10 @@ const FacultyMatcher: React.FC = () => {
                 />
             </div>
 
-            {/* Section 3: Application & Business Info (New) */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-shadow">
-                <div className="absolute top-0 left-0 w-1 h-full bg-teal-500"></div>
-                <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-teal-100 text-teal-600 flex items-center justify-center text-xs font-bold">3</span>
+            {/* Section 3: Application & Business Info */}
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 border-l-4 border-l-blue-500 relative overflow-hidden group hover:shadow-md transition-shadow">
+                <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">3</span>
                     申请与业务信息
                 </h3>
                 
@@ -417,7 +508,7 @@ const FacultyMatcher: React.FC = () => {
                             <input 
                                 type="text"
                                 placeholder="如: 27fall"
-                                className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm"
+                                className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
                                 value={entryYear}
                                 onChange={(e) => setEntryYear(e.target.value)}
                             />
@@ -427,7 +518,7 @@ const FacultyMatcher: React.FC = () => {
                             <input 
                                 type="text"
                                 placeholder="如: 全奖, CSC"
-                                className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm"
+                                className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
                                 value={scholarship}
                                 onChange={(e) => setScholarship(e.target.value)}
                             />
@@ -450,7 +541,7 @@ const FacultyMatcher: React.FC = () => {
                         <input 
                             type="text"
                             placeholder="如: Jennifer, Round 1, DDL 11.28"
-                            className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm"
+                            className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
                             value={businessInfo}
                             onChange={(e) => setBusinessInfo(e.target.value)}
                         />
@@ -461,18 +552,15 @@ const FacultyMatcher: React.FC = () => {
             <button
               onClick={handleMatch}
               disabled={loading}
-              className={`w-full py-4 px-6 rounded-xl font-bold text-white shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-0.5 active:translate-y-0 ${
+              className={`w-full py-3 px-6 rounded-xl font-bold text-white shadow-sm transition-all transform active:scale-95 ${
                 loading
-                  ? 'bg-gray-400 cursor-not-allowed shadow-none'
-                  : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:shadow-xl hover:shadow-blue-500/40'
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700'
               }`}
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
+                  <Loader2 className="animate-spin h-5 w-5 text-white" />
                   AI 正在智能分析...
                 </span>
               ) : (
@@ -482,339 +570,101 @@ const FacultyMatcher: React.FC = () => {
             
             {error && (
               <div className="p-4 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100 flex items-start gap-2 animate-fade-in">
-                <span className="text-lg mt-0.5">⚠️</span>
+                <AlertCircle className="w-5 h-5 shrink-0" />
                 <div className="leading-snug">{error}</div>
               </div>
             )}
+            
+            <div className="h-8"></div> {/* Spacer */}
         </div>
+      </div>
 
-        {/* Right Column: Results */}
-        <div className="lg:col-span-8">
-             <div className="bg-white rounded-[2rem] p-1 shadow-xl shadow-slate-200/50 border border-gray-100 min-h-[700px] flex flex-col">
-                 <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 rounded-t-[2rem] backdrop-blur-sm">
-                    <div>
-                        <h3 className="text-xl font-bold text-gray-800">推荐导师列表</h3>
-                        <p className="text-xs text-gray-500 mt-1 font-medium">
-                            {targets.some(t => t.region || t.university) ? `多区域定向搜索 (共需约 ${targets.reduce((acc, t) => acc + (t.count||5), 0)} 人)` : "🔍 模式: 全球搜索"}
-                        </p>
-                    </div>
-                    
-                    <div className="flex gap-2">
-                        {results && (
-                             <button
-                                onClick={handleExportCSV}
-                                className="bg-green-600 text-white px-4 py-1.5 rounded-full text-sm font-bold shadow-sm hover:bg-green-700 transition-colors flex items-center gap-1"
+      {/* Right Column: Results */}
+      <div className="flex-1 overflow-y-auto p-8 custom-scrollbar relative">
+         <div className="max-w-5xl mx-auto space-y-6">
+             <div className="flex justify-between items-center mb-6">
+                <div>
+                    <h3 className="text-xl font-bold text-gray-900">推荐导师列表</h3>
+                    <p className="text-xs text-gray-500 mt-1 font-medium">
+                        {targets.some(t => t.region || t.university) ? `多区域定向搜索 (共需约 ${targets.reduce((acc, t) => acc + (t.count||5), 0)} 人)` : "🔍 模式: 全球搜索"}
+                    </p>
+                </div>
+                
+                <div className="flex gap-2">
+                    {results && (
+                        <>
+                            <button
+                                onClick={handleBatchSave}
+                                className="bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-xl text-sm font-bold shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                                  <path fillRule="evenodd" d="M4.5 2A1.5 1.5 0 003 3.5v13A1.5 1.5 0 004.5 18h11a1.5 1.5 0 001.5-1.5V7.621a1.5 1.5 0 00-.44-1.06l-4.12-4.122A1.5 1.5 0 0011.378 2H4.5zm2.25 8.5a.75.75 0 000 1.5h6.5a.75.75 0 000-1.5h-6.5zm0 3a.75.75 0 000 1.5h6.5a.75.75 0 000-1.5h-6.5z" clipRule="evenodd" />
-                                </svg>
+                                <Star size={16} />
+                                收藏全部
+                            </button>
+                            {activeClientId && (
+                                <button
+                                    onClick={handleBatchLink}
+                                    className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-2 rounded-xl text-sm font-bold shadow-sm hover:bg-blue-100 transition-colors flex items-center gap-2"
+                                >
+                                    <UserPlus size={16} />
+                                    推荐全部给学生
+                                </button>
+                            )}
+                            <button
+                                onClick={handleExportCSV}
+                                className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm hover:bg-green-700 transition-colors flex items-center gap-2"
+                            >
+                                <FileSpreadsheet size={16} />
                                 导出 Excel
                             </button>
-                        )}
-                        {results && <span className="bg-emerald-100 text-emerald-700 px-4 py-1.5 rounded-full text-sm font-bold shadow-sm">已优选 {results.length} 位</span>}
-                    </div>
-                 </div>
-                 
-                 <div className="flex-1 p-4 md:p-8 space-y-8 overflow-y-auto max-h-[900px] bg-slate-50/30 rounded-b-[2rem]">
-                    {!results && !loading && (
-                        <div className="h-full flex flex-col items-center justify-center text-gray-300 select-none">
-                            <div className="w-24 h-24 bg-gray-50 rounded-full flex items-center justify-center mb-6">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10 text-gray-300">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
-                                </svg>
-                            </div>
-                            <p className="text-lg font-medium text-gray-400">等待输入...</p>
-                            <p className="text-sm mt-2 text-gray-300">系统将自动分析您的背景，识别意向学校。</p>
-                        </div>
+                        </>
                     )}
-
-                    {loading && (
-                         <div className="space-y-8">
-                             {[1,2].map(i => (
-                                 <div key={i} className="bg-white p-6 rounded-2xl border border-gray-100 h-96 animate-pulse flex flex-col gap-6">
-                                     <div className="flex justify-between items-start">
-                                         <div className="space-y-3 w-1/2">
-                                             <div className="h-8 bg-gray-100 w-2/3 rounded-lg"></div>
-                                             <div className="h-4 bg-gray-100 w-1/2 rounded"></div>
-                                         </div>
-                                         <div className="h-8 bg-gray-100 w-16 rounded-lg"></div>
-                                     </div>
-                                     <div className="h-32 bg-gray-50 rounded-xl border border-gray-100"></div>
-                                     <div className="space-y-2">
-                                         <div className="h-3 bg-gray-100 w-full rounded"></div>
-                                         <div className="h-3 bg-gray-100 w-5/6 rounded"></div>
-                                     </div>
-                                 </div>
-                             ))}
-                         </div>
-                    )}
-
-                    {results && results.map((prof, idx) => (
-                      <div key={idx} className="bg-white p-6 md:p-8 rounded-3xl border border-gray-100 shadow-[0_2px_8px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgb(0,0,0,0.08)] transition-all duration-300 group relative">
-                         {/* QS Badge */}
-                        {prof.qsRanking && (
-                            <div className="absolute top-0 right-0 -mt-3 -mr-3 bg-amber-400 text-white text-xs font-bold px-3 py-1.5 rounded-bl-xl rounded-tr-xl shadow-md z-10 flex items-center gap-1">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
-                                  <path fillRule="evenodd" d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.831-4.401z" clipRule="evenodd" />
-                                </svg>
-                                {prof.qsRanking}
-                            </div>
-                        )}
-
-                        {/* Header Section */}
-                        <div className="flex flex-col md:flex-row justify-between items-start mb-6 gap-4">
-                            {/* Left Side: Photo & Name */}
-                            <div className="flex flex-col md:flex-row gap-5 w-full">
-                                {/* Profile Photo */}
-                                <div className="flex-shrink-0">
-                                    {prof.photoUrl ? (
-                                        <div className="w-20 h-20 rounded-2xl overflow-hidden shadow-md border border-gray-100 bg-gray-50 relative group/photo">
-                                            <img 
-                                                src={prof.photoUrl} 
-                                                alt={prof.name} 
-                                                className="w-full h-full object-cover"
-                                                onError={(e) => {
-                                                    e.currentTarget.style.display = 'none';
-                                                    e.currentTarget.parentElement?.classList.add('hidden');
-                                                    const fallback = document.getElementById(`fallback-${idx}`);
-                                                    if (fallback) fallback.classList.remove('hidden');
-                                                }}
-                                            />
-                                            {/* Fallback Element (Hidden by default, shown on error) */}
-                                            <div id={`fallback-${idx}`} className="hidden absolute inset-0 bg-indigo-100 flex items-center justify-center text-indigo-400 font-bold text-2xl">
-                                                {prof.name.charAt(0)}
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="w-20 h-20 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-400 font-bold text-2xl shadow-inner border border-indigo-50">
-                                            {prof.name.charAt(0)}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="flex-1">
-                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-2">
-                                        <h4 className="text-2xl font-extrabold text-gray-900 leading-tight">
-                                            {prof.name}
-                                        </h4>
-                                        <div className="flex items-center gap-2">
-                                            {prof.profileUrl && (
-                                                <a 
-                                                    href={prof.profileUrl} 
-                                                    target="_blank" 
-                                                    rel="noopener noreferrer" 
-                                                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-bold hover:bg-blue-600 hover:text-white transition-all border border-blue-100"
-                                                    title="访问个人主页"
-                                                >
-                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                                                        <path fillRule="evenodd" d="M4.25 5.5a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h8.5a.75.75 0 00.75-.75v-4a.75.75 0 011.5 0v4A2.25 2.25 0 0112.75 17h-8.5A2.25 2.25 0 012 14.75v-8.5A2.25 2.25 0 014.25 4h5a.75.75 0 010 1.5h-5z" clipRule="evenodd" />
-                                                        <path fillRule="evenodd" d="M6.194 12.753a.75.75 0 001.06.053L16.5 4.44v2.81a.75.75 0 001.5 0v-4.5a.75.75 0 00-.75-.75h-4.5a.75.75 0 000 1.5h2.553l-9.056 8.194a.75.75 0 00-.053 1.06z" clipRule="evenodd" />
-                                                    </svg>
-                                                    个人主页
-                                                </a>
-                                            )}
-                                            {prof.email && (
-                                                <a 
-                                                    href={`mailto:${prof.email}`}
-                                                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-gray-50 text-gray-600 rounded-full text-xs font-bold hover:bg-gray-200 transition-all border border-gray-200"
-                                                    title={`Email: ${prof.email}`}
-                                                >
-                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                                                        <path d="M3 4a2 2 0 00-2 2v1.161l8.441 4.221a1.25 1.25 0 001.118 0L19 7.162V6a2 2 0 00-2-2H3z" />
-                                                        <path d="M19 8.839l-7.77 3.885a2.75 2.75 0 01-2.46 0L1 8.839V14a2 2 0 002 2h14a2 2 0 002-2V8.839z" />
-                                                    </svg>
-                                                    联系邮箱
-                                                </a>
-                                            )}
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="flex flex-col gap-1">
-                                        <div className="flex items-center gap-3">
-                                            <p className="text-sm text-gray-500 font-semibold uppercase tracking-wide">{prof.title}</p>
-                                            <span className="w-1 h-1 rounded-full bg-gray-300"></span>
-                                            <p className="text-sm text-gray-900 font-bold">{prof.university}</p>
-                                        </div>
-                                        <div className="flex items-center gap-2 mt-1">
-                                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${prof.isActive ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' : 'text-rose-700 bg-rose-50 border border-rose-100'}`}>
-                                                {prof.isActive ? '在职活跃' : '状态未知/离职'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="flex flex-col items-end gap-2 min-w-[80px]">
-                                {studentProfile.trim() && (
-                                    <div className={`px-5 py-2 rounded-2xl text-base font-bold shadow-sm flex items-center gap-2 ${
-                                        prof.matchScore >= 90 ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white' :
-                                        prof.matchScore >= 80 ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white' :
-                                        prof.matchScore >= 60 ? 'bg-gradient-to-r from-amber-400 to-orange-500 text-white' :
-                                        'bg-gray-200 text-gray-500'
-                                    }`}>
-                                        <span className="text-xs opacity-80 uppercase tracking-wider font-medium">Match</span>
-                                        {prof.matchScore}%
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        
-                        {/* Research Areas Tags */}
-                        <div className="mb-8">
-                             <div className="flex flex-wrap gap-2">
-                                {prof.researchAreas.map((area, i) => (
-                                    <span key={i} className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-semibold rounded-lg border border-slate-200 hover:bg-slate-200 transition-colors cursor-default">
-                                        {area}
-                                    </span>
-                                ))}
-                             </div>
-                        </div>
-
-                        {/* === AUDIT REPORT CARD === */}
-                        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm ring-1 ring-slate-100/50 mb-8 relative">
-                            {/* Header of Report */}
-                            <div className="bg-slate-50/80 px-5 py-3 border-b border-slate-100 flex items-center justify-between backdrop-blur-md">
-                                <div className="flex items-center gap-2.5">
-                                    <div className="bg-indigo-100 text-indigo-600 p-1.5 rounded-lg">
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
-                                    </div>
-                                    <span className="font-bold text-slate-800 text-sm tracking-tight">AI 深度匹配审计报告</span>
-                                </div>
-                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-white px-2 py-1 rounded border border-slate-100 shadow-sm">
-                                    Verified
-                                </span>
-                            </div>
-
-                            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-8 relative">
-                                {/* Decorative vertical line for desktop */}
-                                <div className="hidden md:block absolute left-1/2 top-6 bottom-6 w-px bg-slate-100"></div>
-
-                                {/* Left Column: Hard Constraints */}
-                                <div className="space-y-2">
-                                    <h6 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span> 
-                                        硬性指标核查
-                                    </h6>
-                                    <div className="space-y-1">
-                                        <AuditItem 
-                                            label="区域 / 国家" 
-                                            value={prof.matchReasoning.locationCheck}
-                                            icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
-                                        />
-                                        <AuditItem 
-                                            label="所属院校" 
-                                            value={prof.matchReasoning.universityCheck}
-                                            icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>}
-                                        />
-                                        <AuditItem 
-                                            label="所在院系" 
-                                            value={prof.matchReasoning.departmentCheck}
-                                            icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>}
-                                        />
-                                        <AuditItem 
-                                            label="目前职级" 
-                                            value={prof.matchReasoning.positionCheck}
-                                            icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>}
-                                        />
-                                    </div>
-                                </div>
-
-                                {/* Right Column: Soft Skills & Fit */}
-                                <div className="flex flex-col h-full">
-                                    <h6 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span> 
-                                        活跃度与综合评价
-                                    </h6>
-                                    
-                                    <div className="grid grid-cols-1 gap-3 mb-6">
-                                        <div className="bg-amber-50/50 rounded-xl p-3.5 border border-amber-100/60">
-                                            <div className="text-[10px] font-bold text-amber-600/70 uppercase mb-1">近期学术活跃度</div>
-                                            <div className="text-sm font-semibold text-amber-900 leading-snug">{prof.matchReasoning.activityCheck}</div>
-                                        </div>
-                                        <div className="bg-indigo-50/50 rounded-xl p-3.5 border border-indigo-100/60">
-                                            <div className="text-[10px] font-bold text-indigo-600/70 uppercase mb-1">综合声望评价</div>
-                                            <div className="text-sm font-semibold text-indigo-900 leading-snug">{prof.matchReasoning.reputationCheck}</div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="mt-auto">
-                                        <h6 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 
-                                            核心契合点
-                                        </h6>
-                                        <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100">
-                                            <p className="text-sm text-slate-600 leading-relaxed font-medium">
-                                                {prof.matchReasoning.researchFit}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Recent Activities Timeline */}
-                        {(prof.activitySummary || (prof.recentActivities && prof.recentActivities.length > 0)) && (
-                            <div className="mt-6 px-1">
-                                <h5 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    近五年学术动态 (按时间倒序)
-                                </h5>
-                                
-                                {/* Summary Block */}
-                                {prof.activitySummary && (
-                                    <div className="mb-6 bg-blue-50/50 p-3 rounded-lg border border-blue-100/50 text-sm text-blue-900 leading-relaxed font-medium">
-                                        {prof.activitySummary}
-                                    </div>
-                                )}
-
-                                {/* Timeline with Scroll for long lists */}
-                                {prof.recentActivities && prof.recentActivities.length > 0 && (
-                                    <div className="max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                                        <div className="space-y-0 relative border-l border-gray-100 ml-2 pt-1 pb-1">
-                                            {prof.recentActivities.map((activity, i) => {
-                                                const parsed = parseActivity(activity);
-                                                return (
-                                                    <div key={i} className="mb-4 ml-6 relative group/item">
-                                                        <span className="absolute -left-[31px] top-1.5 w-2.5 h-2.5 rounded-full bg-white border-2 border-blue-200 group-hover/item:border-blue-400 transition-colors"></span>
-                                                        <p className="text-sm text-gray-600 leading-relaxed group-hover/item:text-gray-900 transition-colors">
-                                                            {parsed.tags ? (
-                                                                <>
-                                                                    <span className="font-bold text-blue-700 mr-2">{parsed.tags}</span>
-                                                                    <span className="text-gray-700 font-medium">{parsed.content}</span>
-                                                                </>
-                                                            ) : (
-                                                                activity
-                                                            )}
-                                                        </p>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                        
-                        {/* Admission Info Preview (Optional view in card) */}
-                        {prof.deadlineData && (
-                            <div className="mt-4 p-4 bg-purple-50 rounded-xl border border-purple-100 text-xs text-purple-800 flex justify-between items-center">
-                                <div>
-                                    <span className="font-bold">Next Deadline:</span> {prof.deadlineData.value}
-                                </div>
-                                {prof.deadlineData.sourceUrl && (
-                                    <a href={prof.deadlineData.sourceUrl} target="_blank" rel="noreferrer" className="underline opacity-60 hover:opacity-100">Source</a>
-                                )}
-                            </div>
-                        )}
-                      </div>
-                    ))}
-                 </div>
+                    {results && <span className="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl text-sm font-bold shadow-sm flex items-center">已优选 {results.length} 位</span>}
+                </div>
              </div>
-        </div>
+             
+             {!results && !loading && (
+                <div className="flex flex-col items-center justify-center h-[60vh] text-gray-300 select-none border-2 border-dashed border-gray-200 rounded-3xl bg-gray-50/50">
+                    <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-6 shadow-sm border border-gray-100">
+                        <Search className="w-10 h-10 text-gray-300" />
+                    </div>
+                    <p className="text-lg font-medium text-gray-400">等待输入...</p>
+                    <p className="text-sm mt-2 text-gray-300">系统将自动分析您的背景，识别意向学校。</p>
+                </div>
+            )}
+
+            {loading && (
+                 <div className="space-y-8">
+                     {[1,2].map(i => (
+                         <div key={i} className="bg-white p-6 rounded-2xl border border-gray-100 h-96 animate-pulse flex flex-col gap-6">
+                             <div className="flex justify-between items-start">
+                                 <div className="space-y-3 w-1/2">
+                                     <div className="h-8 bg-gray-100 w-2/3 rounded-lg"></div>
+                                     <div className="h-4 bg-gray-100 w-1/2 rounded"></div>
+                                 </div>
+                                 <div className="h-8 bg-gray-100 w-16 rounded-lg"></div>
+                             </div>
+                             <div className="h-32 bg-gray-50 rounded-xl border border-gray-100"></div>
+                             <div className="space-y-2">
+                                 <div className="h-3 bg-gray-100 w-full rounded"></div>
+                                 <div className="h-3 bg-gray-100 w-5/6 rounded"></div>
+                             </div>
+                         </div>
+                     ))}
+                 </div>
+            )}
+
+            {results && results.map((prof, idx) => (
+              <div key={idx}>
+                <FacultyCard 
+                    prof={prof}
+                    onSave={handleSaveToDatabase}
+                    onLink={activeClientId ? handleLinkToClient : undefined}
+                    isSaved={isFacultyInDB(prof)}
+                    isLinked={isFacultyLinked(prof)}
+                />
+              </div>
+            ))}
+         </div>
       </div>
     </div>
   );

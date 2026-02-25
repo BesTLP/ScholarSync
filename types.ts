@@ -43,6 +43,19 @@ export interface FacultyMember {
   matchReasoning: MatchReasoning;
 }
 
+export interface FacultyRecord extends FacultyMember {
+  // ===== 数据库管理字段 =====
+  id: string;                    // 唯一ID (crypto.randomUUID())
+  country: string;               // 国家/地区分类 (如"美国"、"英国"、"中国香港")
+  fieldCategory: string;         // 专业/学科分类 (如"计算机科学"、"机械工程")
+  customTags?: string[];         // 用户自定义标签 (如"已联系"、"回复快"、"套磁优先")
+  addedAt: string;               // 添加到数据库的时间 (ISO格式)
+  updatedAt: string;             // 最后修改时间
+  source: 'search' | 'manual';  // 来源：搜索匹配添加 or 手动录入
+  notes?: string;                // 用户备注
+  linkedClientIds?: string[];    // 关联的客户ID列表（推荐给了哪些学生）
+}
+
 export interface TargetOption {
   region: string;
   university: string;
@@ -92,7 +105,7 @@ export interface Award {
 
 export interface Contact {
   id: string;
-  type: 'phone' | 'address';
+  type: 'phone' | 'address' | 'email';
   value: string;
 }
 
@@ -108,6 +121,7 @@ export interface ClientDocument {
 export interface Client {
   id: string;
   name: string;
+  university?: string;
   status: 'active' | 'archived';
   createdAt: string;
   advisor?: string;
@@ -127,4 +141,19 @@ export interface Client {
   skillsAndQualities?: string;
   growthAndDevelopment?: string;
   documents?: ClientDocument[];
+  researchPapers?: Array<{
+    id: string;
+    title: string;
+    journal: string;
+    date: string;
+    link: string;
+  }>;
+  identityDocs?: Array<{
+    id: string;
+    type: string;
+    number: string;
+    expiry: string;
+  }>;
+  avatarUrl?: string;
+  linkedFacultyIds?: string[];
 }

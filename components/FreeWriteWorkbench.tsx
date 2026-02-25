@@ -192,10 +192,11 @@ interface FreeWriteWorkbenchProps {
   onSaveDocument: (clientId: string, document: { id?: string; title: string; type: string; content: string }) => string | undefined;
   initialDocument?: { id: string; content: string; title: string };
   onBack: () => void;
+  initialClientId?: string;
 }
 
-const FreeWriteWorkbench: React.FC<FreeWriteWorkbenchProps> = ({ clients, onTabChange, onAddClientClick, onSaveDocument, initialDocument, onBack }) => {
-  const [selectedClientId, setSelectedClientId] = useState<string>('');
+const FreeWriteWorkbench: React.FC<FreeWriteWorkbenchProps> = ({ clients, onTabChange, onAddClientClick, onSaveDocument, initialDocument, onBack, initialClientId }) => {
+  const [selectedClientId, setSelectedClientId] = useState<string>(initialClientId || '');
   const [documentContent, setDocumentContent] = useState<string>(initialDocument?.content || '');
   const [essayLength, setEssayLength] = useState(600);
   const [style, setStyle] = useState('Narrative');
@@ -203,6 +204,12 @@ const FreeWriteWorkbench: React.FC<FreeWriteWorkbenchProps> = ({ clients, onTabC
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentDocId, setCurrentDocId] = useState<string | undefined>(initialDocument?.id);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    if (initialClientId) {
+      setSelectedClientId(initialClientId);
+    }
+  }, [initialClientId]);
 
   useEffect(() => {
     if (initialDocument) {
@@ -244,8 +251,8 @@ const FreeWriteWorkbench: React.FC<FreeWriteWorkbenchProps> = ({ clients, onTabC
       const client = clients.find(c => c.id === selectedClientId);
       const result = await generateEssay({
         studentName: client?.name || '',
-        prompt: `Style: ${style}. ${prompt}`,
-        length: essayLength,
+        promptText: `Style: ${style}. ${prompt}`,
+        wordCount: essayLength,
         studentProfile: client
       });
       setDocumentContent(result || '');
@@ -284,11 +291,19 @@ const FreeWriteWorkbench: React.FC<FreeWriteWorkbenchProps> = ({ clients, onTabC
             >
               <ChevronLeft size={16} />
             </button>
-            <span className="text-gray-400">EduPro</span>
+            <span className="text-gray-400">留学咩</span>
             <ChevronRight size={12} className="text-gray-300" />
             <span className="text-gray-900 font-bold">自由创作</span>
           </div>
           <div className="flex items-center space-x-4">
+            {saveSuccess && (
+              <button 
+                onClick={onBack}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-xs font-bold hover:bg-gray-200 transition-all"
+              >
+                返回客户详情
+              </button>
+            )}
             <button className="p-2 text-gray-400 hover:text-gray-900 transition-colors">
               <Moon size={18} />
             </button>

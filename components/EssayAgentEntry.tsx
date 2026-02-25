@@ -11,10 +11,11 @@ import {
   Search as SearchIcon
 } from 'lucide-react';
 import { Client } from '../types';
+import { parseClientFile } from '../services/geminiService';
 
 interface EssayAgentEntryProps {
   clients: Client[];
-  onAddClient: (name: string) => void;
+  onAddClient: (name: string, parsedData?: Partial<Client>) => void;
   onSelectClient: (client: Client) => void;
 }
 
@@ -24,19 +25,36 @@ const EssayAgentEntry: React.FC<EssayAgentEntryProps> = ({ clients, onAddClient,
   const [searchQuery, setSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsUploading(true);
     
-    // Simulate parsing and建档
-    setTimeout(() => {
-      const mockName = file.name.split('.')[0] || '新上传学生';
-      onAddClient(mockName);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const result = event.target?.result as string;
+        if (result) {
+          try {
+            const data = await parseClientFile(result, file.type);
+            const clientName = data.name || file.name.split('.')[0] || '新上传学生';
+            onAddClient(clientName, data);
+            setActiveTab('select');
+          } catch (err) {
+            console.error("Parsing failed", err);
+            onAddClient(file.name.split('.')[0]);
+            setActiveTab('select');
+          } finally {
+            setIsUploading(false);
+          }
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error(error);
       setIsUploading(false);
-      setActiveTab('select');
-    }, 2000);
+    }
   };
 
   const filteredClients = clients.filter(c => 
@@ -48,7 +66,7 @@ const EssayAgentEntry: React.FC<EssayAgentEntryProps> = ({ clients, onAddClient,
       {/* Top Navigation / Breadcrumbs */}
       <div className="w-full bg-white border-b border-gray-100 px-8 py-4 flex items-center justify-between shrink-0">
         <div className="flex items-center space-x-2 text-xs font-medium">
-          <span className="text-gray-400">EduPro</span>
+          <span className="text-gray-400">留学咩</span>
           <ChevronRight size={12} className="text-gray-300" />
           <span className="text-gray-900 font-bold">Agentic</span>
         </div>

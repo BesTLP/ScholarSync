@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Search,
   Moon,
@@ -19,10 +19,15 @@ import {
   Edit3,
   CheckCircle2,
   MessageCircle,
-  Plus
+  Plus,
+  X,
+  Minimize2,
+  Maximize2,
+  GripHorizontal
 } from 'lucide-react';
 import { TabId } from './Sidebar';
 import { Client } from '../types';
+import ChatBot from './ChatBot';
 
 // --- Sub-components ---
 
@@ -72,6 +77,65 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ onTabChange, clients, onSelectClient }) => {
   const totalDocuments = clients.reduce((acc, client) => acc + (client.documents?.length || 0), 0);
   const recentClients = [...clients].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 3);
+  
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Client[]>([]);
+
+  // ChatBot State
+  const [showChatBot, setShowChatBot] = useState(false);
+  const [isChatBotMinimized, setIsChatBotMinimized] = useState(false);
+  const [chatBotPosition, setChatBotPosition] = useState({ x: window.innerWidth - 420, y: window.innerHeight - 650 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartPos = useRef({ x: 0, y: 0 });
+  const chatBotRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      const results = clients.filter(client => 
+        client.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        client.advisor?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        client.university?.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setSearchResults(results);
+    } else {
+      setSearchResults([]);
+    }
+  }, [searchQuery, clients]);
+
+  // Drag Logic
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    dragStartPos.current = {
+      x: e.clientX - chatBotPosition.x,
+      y: e.clientY - chatBotPosition.y
+    };
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isDragging) {
+        setChatBotPosition({
+          x: e.clientX - dragStartPos.current.x,
+          y: e.clientY - dragStartPos.current.y
+        });
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
 
   const quickActions = [
     { id: 'agent' as TabId, title: '文书 Agent', subtitle: '全流程智能文书创作', icon: Wand2, iconBg: 'bg-purple-50', iconColor: 'text-purple-600' },
@@ -93,11 +157,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange, clients, onSelectCli
   ];
 
   return (
-    <div className="min-h-screen bg-[#F7F8FA] pb-20">
+    <div className="min-h-screen bg-[#F7F8FA] pb-20 relative">
       {/* Header */}
       <header className="bg-white border-b border-gray-100 h-16 flex items-center justify-between px-8 sticky top-0 z-10">
         <div className="flex items-center">
-          <span className="text-xl font-bold text-gray-900">EduPro</span>
+          <span className="text-xl font-bold text-gray-900">留学咩</span>
         </div>
         <div className="flex items-center space-x-4">
           <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
@@ -109,12 +173,39 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange, clients, onSelectCli
             </div>
             <input 
               type="text" 
-              placeholder="搜索功能或文档..." 
+              placeholder="搜索客户..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="bg-gray-100 border-none rounded-lg py-2 pl-10 pr-12 text-sm focus:ring-2 focus:ring-blue-500 w-64 transition-all"
             />
             <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
               <span className="text-[10px] font-medium text-gray-400 bg-white px-1.5 py-0.5 rounded border border-gray-200">⌘K</span>
             </div>
+            
+            {/* Search Results Dropdown */}
+            {searchQuery && (
+              <div className="absolute top-full left-0 w-full mt-2 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50 max-h-64 overflow-y-auto">
+                {searchResults.length > 0 ? (
+                  searchResults.map(client => (
+                    <button 
+                      key={client.id}
+                      onClick={() => onSelectClient(client)}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-50 flex items-center border-b border-gray-50 last:border-0"
+                    >
+                      <div className="w-8 h-8 bg-gray-100 rounded-full mr-3 overflow-hidden shrink-0">
+                         <img src={client.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`} className="w-full h-full object-cover" alt={client.name} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-bold text-gray-900 truncate">{client.name}</div>
+                        <div className="text-xs text-gray-500 truncate">{client.advisor || '未分配导师'}</div>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-4 py-2 text-xs text-gray-500 text-center">未找到相关客户</div>
+                )}
+              </div>
+            )}
           </div>
           <div className="w-8 h-8 rounded-full bg-blue-100 border border-blue-200 overflow-hidden">
             <img src="https://picsum.photos/seed/user/100/100" alt="Avatar" referrerPolicy="no-referrer" />
@@ -246,7 +337,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange, clients, onSelectCli
                     <div className="flex items-center space-x-4">
                       <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center text-gray-400 group-hover:bg-cyan-50 group-hover:text-cyan-500 transition-colors overflow-hidden">
                         <img 
-                          src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`} 
+                          src={client.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`} 
                           alt="avatar" 
                           className="w-full h-full object-cover"
                         />
@@ -293,12 +384,62 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange, clients, onSelectCli
       </div>
 
       {/* Floating AI Assistant */}
-      <button className="fixed bottom-8 right-8 w-14 h-14 bg-green-500 text-white rounded-full shadow-2xl shadow-green-200 flex items-center justify-center hover:scale-110 transition-transform z-50">
-        <MessageCircle size={28} />
-      </button>
+      {!showChatBot && (
+        <button 
+          onClick={() => setShowChatBot(true)}
+          className="fixed bottom-8 right-8 w-14 h-14 bg-green-500 text-white rounded-full shadow-2xl shadow-green-200 flex items-center justify-center hover:scale-110 transition-transform z-50"
+        >
+          <MessageCircle size={28} />
+        </button>
+      )}
 
-      {/* Sidebar bottom recharge button (simulated as fixed if needed, but usually in sidebar) */}
-      {/* Since I'm building the Dashboard content, I'll assume the sidebar handles its own buttons */}
+      {/* Draggable ChatBot Window */}
+      {showChatBot && (
+        <div 
+          ref={chatBotRef}
+          style={{ 
+            position: 'fixed', 
+            left: chatBotPosition.x, 
+            top: chatBotPosition.y,
+            width: isChatBotMinimized ? '300px' : '400px',
+            height: isChatBotMinimized ? 'auto' : '600px',
+            zIndex: 100
+          }}
+          className="bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden transition-all duration-200"
+        >
+          {/* Draggable Header */}
+          <div 
+            onMouseDown={handleMouseDown}
+            className="h-10 bg-gray-50 border-b border-gray-100 flex items-center justify-between px-4 cursor-move select-none"
+          >
+            <div className="flex items-center space-x-2 text-gray-500">
+              <GripHorizontal size={16} />
+              <span className="text-xs font-bold">学术助手</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button 
+                onClick={() => setIsChatBotMinimized(!isChatBotMinimized)}
+                className="p-1 hover:bg-gray-200 rounded text-gray-400 hover:text-gray-600"
+              >
+                {isChatBotMinimized ? <Maximize2 size={14} /> : <Minimize2 size={14} />}
+              </button>
+              <button 
+                onClick={() => setShowChatBot(false)}
+                className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-500"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* ChatBot Content */}
+          {!isChatBotMinimized && (
+            <div className="flex-1 overflow-hidden">
+              <ChatBot />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

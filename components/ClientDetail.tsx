@@ -1,4 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { generateProfileAnalysis } from '../services/geminiService';
+import ReactMarkdown from 'react-markdown';
 import { 
   ChevronLeft, 
   Edit2, 
@@ -27,9 +29,15 @@ import {
   UserCheck,
   Award,
   Clapperboard,
-  FileBadge
+  FileBadge,
+  Trash2,
+  Archive,
+  Download,
+  Link as LinkIcon,
+  UserPlus
 } from 'lucide-react';
-import { Client } from '../types';
+import { Client, FacultyRecord } from '../types';
+import FacultyCard from './FacultyCard';
 
 interface ClientDetailProps {
   client: Client;
@@ -37,6 +45,10 @@ interface ClientDetailProps {
   onStartWriting: (type?: string) => void;
   onEditDocument: (doc: any) => void;
   onUpdateClient: (client: Client) => void;
+  initialTab?: 'profile' | 'documents' | 'mentors';
+  facultyDatabase?: FacultyRecord[];
+  onLinkFacultyToClient?: (facultyId: string, clientId: string) => void;
+  onUnlinkFacultyFromClient?: (facultyId: string, clientId: string) => void;
 }
 
 const Modal: React.FC<{ isOpen: boolean; onClose: () => void; onConfirm: () => void; title: string; children: React.ReactNode }> = ({ isOpen, onClose, onConfirm, title, children }) => {
@@ -56,7 +68,7 @@ const Modal: React.FC<{ isOpen: boolean; onClose: () => void; onConfirm: () => v
         </div>
         <div className="px-6 py-4 bg-white flex justify-end border-t border-gray-50">
           <button onClick={onConfirm} className="w-full py-3 bg-cyan-500 text-white rounded-xl text-sm font-bold hover:bg-cyan-600 transition-all shadow-lg shadow-cyan-100 active:scale-95">
-            添加
+            确认
           </button>
         </div>
       </div>
@@ -91,7 +103,7 @@ const InputField = ({ label, placeholder, type = "text", selectOptions, value, o
         <div className="relative">
           <input 
             type={type === 'date' ? 'text' : type} 
-            placeholder={type === 'date' ? '日/mm/yyyy' : placeholder}
+            placeholder={type === 'date' ? 'YYYY-MM-DD' : placeholder}
             value={value}
             onChange={e => onChange?.(e.target.value)}
             className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-cyan-500 transition-all placeholder:text-gray-300"
@@ -103,10 +115,22 @@ const InputField = ({ label, placeholder, type = "text", selectOptions, value, o
   </div>
 );
 
-const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWriting, onEditDocument, onUpdateClient }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'documents'>('profile');
+const ClientDetail: React.FC<ClientDetailProps> = ({ 
+  client, 
+  onBack, 
+  onStartWriting, 
+  onEditDocument, 
+  onUpdateClient, 
+  initialTab = 'profile',
+  facultyDatabase = [],
+  onLinkFacultyToClient,
+  onUnlinkFacultyFromClient
+}) => {
+  const [activeTab, setActiveTab] = useState<'profile' | 'documents' | 'mentors'>(initialTab);
   const [showWritingMenu, setShowWritingMenu] = useState(false);
   const [showContactMenu, setShowContactMenu] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showAddInfoMenu, setShowAddInfoMenu] = useState(false);
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [basicInfoForm, setBasicInfoForm] = useState({ name: client.name, advisor: client.advisor || '', gpa: client.gpa || '' });
 
@@ -114,10 +138,27 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
   const [eduForm, setEduForm] = useState({ school: '', degree: '', major: '', gpa: '', extraInfo: '', notes: '', startDate: '', endDate: '' });
   const [workForm, setWorkForm] = useState({ company: '', position: '', startDate: '', endDate: '', description: '' });
   const [awardForm, setAwardForm] = useState({ name: '', level: '', date: '', description: '' });
-  const [contactForm, setContactForm] = useState({ type: 'phone' as 'phone' | 'address', value: '' });
+  const [contactForm, setContactForm] = useState({ type: 'phone' as 'phone' | 'address' | 'email', value: '' });
+  const [researchForm, setResearchForm] = useState({ title: '', journal: '', date: '', link: '' });
+  const [identityForm, setIdentityForm] = useState({ type: '身份证', number: '', expiry: '' });
+  const [avatarUrlInput, setAvatarUrlInput] = useState('');
+  
+  const [aiAnalysis, setAiAnalysis] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const writingMenuRef = useRef<HTMLDivElement>(null);
   const contactMenuRef = useRef<HTMLDivElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const addInfoMenuRef = useRef<HTMLDivElement>(null);
+
+  // Refs for scrolling
+  const academicRef = useRef<HTMLDivElement>(null);
+  const extracurricularRef = useRef<HTMLDivElement>(null);
+  const interestsRef = useRef<HTMLDivElement>(null);
+  const careerRef = useRef<HTMLDivElement>(null);
+  const experiencesRef = useRef<HTMLDivElement>(null);
+  const skillsRef = useRef<HTMLDivElement>(null);
+  const growthRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -126,6 +167,12 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
       }
       if (contactMenuRef.current && !contactMenuRef.current.contains(event.target as Node)) {
         setShowContactMenu(false);
+      }
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target as Node)) {
+        setShowMoreMenu(false);
+      }
+      if (addInfoMenuRef.current && !addInfoMenuRef.current.contains(event.target as Node)) {
+        setShowAddInfoMenu(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -182,6 +229,102 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
     });
     setContactForm({ type: 'phone', value: '' });
     setActiveModal(null);
+  };
+
+  const handleAddResearch = () => {
+    const newPaper = { id: Math.random().toString(), ...researchForm };
+    onUpdateClient({
+      ...client,
+      researchPapers: [...(client.researchPapers || []), newPaper]
+    });
+    setResearchForm({ title: '', journal: '', date: '', link: '' });
+    setActiveModal(null);
+  };
+
+  const handleAddIdentity = () => {
+    const newDoc = { id: Math.random().toString(), ...identityForm };
+    onUpdateClient({
+      ...client,
+      identityDocs: [...(client.identityDocs || []), newDoc]
+    });
+    setIdentityForm({ type: '身份证', number: '', expiry: '' });
+    setActiveModal(null);
+  };
+
+  const handleUpdateAvatar = () => {
+    if (avatarUrlInput) {
+      onUpdateClient({ ...client, avatarUrl: avatarUrlInput });
+    }
+    setActiveModal(null);
+  };
+
+  const handleGenerateAnalysis = async () => {
+    setIsAnalyzing(true);
+    try {
+      const analysis = await generateProfileAnalysis(client);
+      setAiAnalysis(analysis);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleExportJSON = () => {
+    const dataStr = JSON.stringify(client, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${client.name}_profile.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setShowMoreMenu(false);
+  };
+
+  const handleArchiveClient = () => {
+    onUpdateClient({ ...client, status: 'archived' });
+    setShowMoreMenu(false);
+  };
+
+  const handleDeleteClient = () => {
+    // In a real app, we would delete from the list. 
+    // Here we might just archive or need a onDelete callback from parent.
+    // For now, let's just alert.
+    if (confirm('确定要删除该客户吗？此操作无法撤销。')) {
+      // onUpdateClient({ ...client, status: 'deleted' }); // Assuming we handle this upstream
+      alert('删除功能需在父组件实现');
+    }
+    setShowMoreMenu(false);
+  };
+
+  const handleDownloadDocument = (doc: any) => {
+    const blob = new Blob([doc.content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${doc.title || 'document'}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDeleteDocument = (docId: string) => {
+    if (confirm('确定要删除该文档吗？此操作无法撤销。')) {
+      const updatedDocs = client.documents?.filter(d => d.id !== docId) || [];
+      onUpdateClient({ ...client, documents: updatedDocs });
+    }
+  };
+
+  const scrollToSection = (ref: React.RefObject<HTMLDivElement>) => {
+    if (ref.current) {
+      ref.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Focus the textarea inside
+      const textarea = ref.current.querySelector('textarea');
+      if (textarea) textarea.focus();
+    }
+    setShowAddInfoMenu(false);
   };
 
   const InfoCard = ({ icon: Icon, title, children, onAdd, items, renderItem }: { icon: any, title: string, children?: React.ReactNode, onAdd?: () => void, items?: any[], renderItem?: (item: any) => React.ReactNode }) => (
@@ -266,7 +409,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
               <ChevronLeft size={20} />
             </button>
             <div className="flex items-center space-x-2 text-xs font-medium">
-              <span className="text-gray-400">EduPro</span>
+              <span className="text-gray-400">留学咩</span>
               <span className="text-gray-300">/</span>
               <span className="text-gray-400">客户</span>
               <span className="text-gray-300">/</span>
@@ -311,9 +454,31 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
               </div>
             )}
 
-            <button className="p-2 text-gray-400 hover:bg-gray-50 rounded-xl border border-gray-100 transition-all">
-              <MoreHorizontal size={18} />
-            </button>
+            <div className="relative" ref={moreMenuRef}>
+              <button 
+                onClick={() => setShowMoreMenu(!showMoreMenu)}
+                className="p-2 text-gray-400 hover:bg-gray-50 rounded-xl border border-gray-100 transition-all"
+              >
+                <MoreHorizontal size={18} />
+              </button>
+              {showMoreMenu && (
+                <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50 animate-in fade-in zoom-in duration-200">
+                  <button onClick={handleExportJSON} className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center">
+                    <Download size={14} className="mr-2" />
+                    导出客户信息(JSON)
+                  </button>
+                  <button onClick={handleArchiveClient} className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center">
+                    <Archive size={14} className="mr-2" />
+                    归档客户
+                  </button>
+                  <div className="h-px bg-gray-50 my-1" />
+                  <button onClick={handleDeleteClient} className="w-full text-left px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 flex items-center">
+                    <Trash2 size={14} className="mr-2" />
+                    删除客户
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -339,9 +504,18 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
             <FileText size={14} className="mr-2" />
             客户文书
           </button>
+          <button 
+            onClick={() => setActiveTab('mentors')}
+            className={`flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+              activeTab === 'mentors' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            <UserCheck size={14} className="mr-2" />
+            推荐导师
+          </button>
         </div>
 
-        {activeTab === 'profile' ? (
+        {activeTab === 'profile' && (
           <div className="grid grid-cols-12 gap-6">
             {/* Left Column - Main Profile */}
             <div className="col-span-8 space-y-6">
@@ -349,9 +523,9 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
               <div className="bg-white rounded-2xl border border-gray-100 p-8 shadow-sm">
                 <div className="flex items-start justify-between mb-8">
                   <div className="flex items-center space-x-6">
-                    <div className="w-20 h-20 bg-gray-900 rounded-full flex items-center justify-center text-white text-3xl font-bold overflow-hidden relative group">
+                    <div className="w-20 h-20 bg-gray-900 rounded-full flex items-center justify-center text-white text-3xl font-bold overflow-hidden relative group cursor-pointer" onClick={() => setActiveModal('avatar')}>
                       <img 
-                        src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`} 
+                        src={client.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`} 
                         alt="avatar" 
                         className="w-full h-full object-cover"
                       />
@@ -456,72 +630,145 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
                     </div>
                   )}
                 />
-                <InfoCard icon={GraduationCap} title="学术成就">
-                  <EditableField 
-                    placeholder="点击输入内容..." 
-                    value={client.academicAchievements}
-                    onChange={(val) => onUpdateClient({ ...client, academicAchievements: val })}
-                  />
-                </InfoCard>
-                <InfoCard icon={Target} title="课外活动">
-                  <EditableField 
-                    placeholder="点击输入内容..." 
-                    value={client.extracurriculars}
-                    onChange={(val) => onUpdateClient({ ...client, extracurriculars: val })}
-                  />
-                </InfoCard>
-                <InfoCard icon={Heart} title="个人兴趣和爱好">
-                  <EditableField 
-                    placeholder="点击输入内容..." 
-                    value={client.interests}
-                    onChange={(val) => onUpdateClient({ ...client, interests: val })}
-                  />
-                </InfoCard>
-                <InfoCard icon={Briefcase} title="职业抱负">
-                  <EditableField 
-                    placeholder="点击输入内容..." 
-                    value={client.careerAspirations}
-                    onChange={(val) => onUpdateClient({ ...client, careerAspirations: val })}
-                  />
-                </InfoCard>
-                <InfoCard icon={Users} title="个人经验和挑战">
-                  <EditableField 
-                    placeholder="点击输入内容..." 
-                    value={client.experiencesAndChallenges}
-                    onChange={(val) => onUpdateClient({ ...client, experiencesAndChallenges: val })}
-                  />
-                </InfoCard>
-                <InfoCard icon={Lightbulb} title="技能和素质">
-                  <EditableField 
-                    placeholder="点击输入内容..." 
-                    value={client.skillsAndQualities}
-                    onChange={(val) => onUpdateClient({ ...client, skillsAndQualities: val })}
-                  />
-                </InfoCard>
-                <InfoCard icon={Sparkles} title="个人成长和发展">
-                  <EditableField 
-                    placeholder="点击输入内容..." 
-                    value={client.growthAndDevelopment}
-                    onChange={(val) => onUpdateClient({ ...client, growthAndDevelopment: val })}
-                  />
-                </InfoCard>
-                <InfoCard icon={FileSearch} title="研究 & 论文 (0)" onAdd={() => {}} />
-                <InfoCard icon={ShieldCheck} title="身份证明 (0)" onAdd={() => {}}>
-                  <div className="flex space-x-2">
-                    <button className="px-3 py-1.5 bg-cyan-50 text-cyan-600 rounded-lg text-[10px] font-bold hover:bg-cyan-100 transition-colors">添加身份证</button>
-                    <button className="px-3 py-1.5 bg-cyan-50 text-cyan-600 rounded-lg text-[10px] font-bold hover:bg-cyan-100 transition-colors">添加护照</button>
-                  </div>
-                </InfoCard>
+                <div ref={academicRef}>
+                  <InfoCard icon={GraduationCap} title="学术成就">
+                    <EditableField 
+                      placeholder="点击输入内容..." 
+                      value={client.academicAchievements}
+                      onChange={(val) => onUpdateClient({ ...client, academicAchievements: val })}
+                    />
+                  </InfoCard>
+                </div>
+                <div ref={extracurricularRef}>
+                  <InfoCard icon={Target} title="课外活动">
+                    <EditableField 
+                      placeholder="点击输入内容..." 
+                      value={client.extracurriculars}
+                      onChange={(val) => onUpdateClient({ ...client, extracurriculars: val })}
+                    />
+                  </InfoCard>
+                </div>
+                <div ref={interestsRef}>
+                  <InfoCard icon={Heart} title="个人兴趣和爱好">
+                    <EditableField 
+                      placeholder="点击输入内容..." 
+                      value={client.interests}
+                      onChange={(val) => onUpdateClient({ ...client, interests: val })}
+                    />
+                  </InfoCard>
+                </div>
+                <div ref={careerRef}>
+                  <InfoCard icon={Briefcase} title="职业抱负">
+                    <EditableField 
+                      placeholder="点击输入内容..." 
+                      value={client.careerAspirations}
+                      onChange={(val) => onUpdateClient({ ...client, careerAspirations: val })}
+                    />
+                  </InfoCard>
+                </div>
+                <div ref={experiencesRef}>
+                  <InfoCard icon={Users} title="个人经验和挑战">
+                    <EditableField 
+                      placeholder="点击输入内容..." 
+                      value={client.experiencesAndChallenges}
+                      onChange={(val) => onUpdateClient({ ...client, experiencesAndChallenges: val })}
+                    />
+                  </InfoCard>
+                </div>
+                <div ref={skillsRef}>
+                  <InfoCard icon={Lightbulb} title="技能和素质">
+                    <EditableField 
+                      placeholder="点击输入内容..." 
+                      value={client.skillsAndQualities}
+                      onChange={(val) => onUpdateClient({ ...client, skillsAndQualities: val })}
+                    />
+                  </InfoCard>
+                </div>
+                <div ref={growthRef}>
+                  <InfoCard icon={Sparkles} title="个人成长和发展">
+                    <EditableField 
+                      placeholder="点击输入内容..." 
+                      value={client.growthAndDevelopment}
+                      onChange={(val) => onUpdateClient({ ...client, growthAndDevelopment: val })}
+                    />
+                  </InfoCard>
+                </div>
+                <InfoCard 
+                  icon={FileSearch} 
+                  title={`研究 & 论文 (${client.researchPapers?.length || 0})`} 
+                  onAdd={() => setActiveModal('research')}
+                  items={client.researchPapers}
+                  renderItem={(paper: any) => (
+                    <div key={paper.id} className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="font-bold text-gray-900 text-xs">{paper.title}</div>
+                          <div className="text-[10px] text-gray-500 mt-1">{paper.journal} · {paper.date}</div>
+                        </div>
+                        {paper.link && (
+                          <a href={paper.link} target="_blank" rel="noopener noreferrer" className="text-cyan-500 hover:text-cyan-600">
+                            <LinkIcon size={14} />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                />
+                <InfoCard 
+                  icon={ShieldCheck} 
+                  title={`身份证明 (${client.identityDocs?.length || 0})`} 
+                  onAdd={() => setActiveModal('identity')}
+                  items={client.identityDocs}
+                  renderItem={(doc: any) => (
+                    <div key={doc.id} className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <div className="font-bold text-gray-900 text-xs">{doc.type}</div>
+                          <div className="text-[10px] text-gray-500 mt-1">{doc.number}</div>
+                        </div>
+                        <div className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-lg">
+                          有效期: {doc.expiry}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                />
               </div>
 
               {/* Add Block */}
-              <button className="w-full py-12 border-2 border-dashed border-gray-100 rounded-2xl flex flex-col items-center justify-center text-gray-300 hover:border-cyan-200 hover:text-cyan-400 transition-all bg-white/50 group">
-                <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-4 group-hover:bg-cyan-50 transition-colors">
-                  <Plus size={24} />
-                </div>
-                <span className="text-sm font-bold text-gray-400 group-hover:text-cyan-600">添加信息块</span>
-                <span className="text-[10px] text-gray-300 mt-1">自定义标题和内容</span>
-              </button>
+              <div className="relative" ref={addInfoMenuRef}>
+                <button 
+                  onClick={() => setShowAddInfoMenu(!showAddInfoMenu)}
+                  className="w-full py-12 border-2 border-dashed border-gray-100 rounded-2xl flex flex-col items-center justify-center text-gray-300 hover:border-cyan-200 hover:text-cyan-400 transition-all bg-white/50 group"
+                >
+                  <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-4 group-hover:bg-cyan-50 transition-colors">
+                    <Plus size={24} />
+                  </div>
+                  <span className="text-sm font-bold text-gray-400 group-hover:text-cyan-600">添加信息块</span>
+                  <span className="text-[10px] text-gray-300 mt-1">自定义标题和内容</span>
+                </button>
+                {showAddInfoMenu && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50 animate-in fade-in zoom-in duration-200">
+                    {[
+                      { label: '学术成就', ref: academicRef },
+                      { label: '课外活动', ref: extracurricularRef },
+                      { label: '个人兴趣', ref: interestsRef },
+                      { label: '职业目标', ref: careerRef },
+                      { label: '经历与挑战', ref: experiencesRef },
+                      { label: '技能与特质', ref: skillsRef },
+                      { label: '成长与发展', ref: growthRef },
+                    ].map((item) => (
+                      <button 
+                        key={item.label}
+                        onClick={() => scrollToSection(item.ref)}
+                        className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Right Column - Sidebar Info */}
@@ -547,19 +794,38 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
                   AI 智能分析
                 </h4>
                 <div className="space-y-4">
-                  <div className="p-4 bg-gray-50 rounded-xl">
-                    <p className="text-xs text-gray-500 leading-relaxed">
-                      基于当前档案，该学生在<span className="text-cyan-600 font-bold">学术研究</span>方面表现突出，建议在文书中重点突出其在实验室的经历。
-                    </p>
+                  <div className="p-4 bg-gray-50 rounded-xl min-h-[100px]">
+                    {aiAnalysis ? (
+                      <div className="prose prose-sm max-w-none text-xs text-gray-600">
+                        <ReactMarkdown>{aiAnalysis}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-500 leading-relaxed">
+                        基于当前档案，该学生在<span className="text-cyan-600 font-bold">学术研究</span>方面表现突出，建议在文书中重点突出其在实验室的经历。
+                      </p>
+                    )}
                   </div>
-                  <button className="w-full py-2.5 bg-gray-900 text-white rounded-xl text-xs font-bold hover:bg-gray-800 transition-all">
-                    生成背景提升建议
+                  <button 
+                    onClick={handleGenerateAnalysis}
+                    disabled={isAnalyzing}
+                    className="w-full py-2.5 bg-gray-900 text-white rounded-xl text-xs font-bold hover:bg-gray-800 transition-all disabled:opacity-50 flex items-center justify-center"
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <Sparkles size={14} className="mr-2 animate-spin" />
+                        分析中...
+                      </>
+                    ) : (
+                      '生成背景提升建议'
+                    )}
                   </button>
                 </div>
               </div>
             </div>
           </div>
-        ) : (
+        )}
+
+        {activeTab === 'documents' && (
           <div className="space-y-6">
             {client.documents && client.documents.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -581,12 +847,28 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
                       <span className="text-[10px] text-gray-400">
                         {new Date(doc.createdAt).toLocaleDateString()}
                       </span>
-                      <button 
-                        onClick={() => onEditDocument(doc)}
-                        className="text-xs font-bold text-cyan-600 hover:text-cyan-700 transition-colors"
-                      >
-                        查看详情
-                      </button>
+                      <div className="flex items-center space-x-2">
+                        <button 
+                          onClick={() => handleDownloadDocument(doc)}
+                          className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+                          title="下载"
+                        >
+                          <Download size={14} />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteDocument(doc.id)}
+                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          title="删除"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                        <button 
+                          onClick={() => onEditDocument(doc)}
+                          className="text-xs font-bold text-cyan-600 hover:text-cyan-700 transition-colors ml-2"
+                        >
+                          查看详情
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -621,6 +903,37 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
                     新建文档
                   </button>
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'mentors' && (
+          <div className="space-y-6">
+            {client.linkedFacultyIds && client.linkedFacultyIds.length > 0 ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {facultyDatabase
+                  .filter(f => client.linkedFacultyIds?.includes(f.id))
+                  .map(faculty => (
+                    <FacultyCard
+                      key={faculty.id}
+                      faculty={faculty}
+                      viewMode="grid"
+                      showActions={true}
+                      isLinked={true}
+                      onUnlink={() => onUnlinkFacultyFromClient?.(faculty.id, client.id)}
+                    />
+                  ))}
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm min-h-[400px] flex flex-col items-center justify-center p-12 text-center">
+                <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center text-gray-300 mb-6">
+                  <UserCheck size={40} />
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">暂无推荐导师</h3>
+                <p className="text-sm text-gray-400 mb-8 max-w-xs">
+                  还没有为该学生推荐任何导师。请前往导师库或智能匹配进行推荐。
+                </p>
               </div>
             )}
           </div>
@@ -777,11 +1090,93 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onStartWrit
       <Modal isOpen={activeModal === 'contact'} onClose={() => setActiveModal(null)} onConfirm={handleAddContact} title={contactForm.type === 'phone' ? '添加联系方式' : '添加地址'}>
         <div className="space-y-4">
           <InputField 
-            label={contactForm.type === 'phone' ? '电话/邮箱' : '详细地址'} 
-            placeholder={contactForm.type === 'phone' ? '请输入联系方式' : '请输入详细地址'} 
+            label="类型" 
+            selectOptions={['phone', 'email', 'address']} 
+            value={contactForm.type}
+            onChange={val => setContactForm({ ...contactForm, type: val as any })}
+          />
+          <InputField 
+            label="内容" 
+            placeholder={contactForm.type === 'phone' ? '请输入电话' : contactForm.type === 'email' ? '请输入邮箱' : '请输入地址'} 
+            type={contactForm.type === 'phone' ? 'tel' : contactForm.type === 'email' ? 'email' : 'text'}
             value={contactForm.value}
             onChange={val => setContactForm({ ...contactForm, value: val })}
           />
+        </div>
+      </Modal>
+
+      <Modal isOpen={activeModal === 'research'} onClose={() => setActiveModal(null)} onConfirm={handleAddResearch} title="添加研究 & 论文">
+        <div className="space-y-4">
+          <InputField 
+            label="论文标题" 
+            placeholder="请输入论文标题" 
+            value={researchForm.title}
+            onChange={val => setResearchForm({ ...researchForm, title: val })}
+          />
+          <InputField 
+            label="期刊/会议" 
+            placeholder="请输入发表期刊或会议" 
+            value={researchForm.journal}
+            onChange={val => setResearchForm({ ...researchForm, journal: val })}
+          />
+          <InputField 
+            label="发表日期" 
+            type="date"
+            value={researchForm.date}
+            onChange={val => setResearchForm({ ...researchForm, date: val })}
+          />
+          <InputField 
+            label="DOI / 链接" 
+            placeholder="请输入链接" 
+            value={researchForm.link}
+            onChange={val => setResearchForm({ ...researchForm, link: val })}
+          />
+        </div>
+      </Modal>
+
+      <Modal isOpen={activeModal === 'identity'} onClose={() => setActiveModal(null)} onConfirm={handleAddIdentity} title="添加身份证明">
+        <div className="space-y-4">
+          <InputField 
+            label="证件类型" 
+            selectOptions={['身份证', '护照', '签证', '其他']} 
+            value={identityForm.type}
+            onChange={val => setIdentityForm({ ...identityForm, type: val })}
+          />
+          <InputField 
+            label="证件号码" 
+            placeholder="请输入证件号码" 
+            value={identityForm.number}
+            onChange={val => setIdentityForm({ ...identityForm, number: val })}
+          />
+          <InputField 
+            label="有效期" 
+            type="date"
+            value={identityForm.expiry}
+            onChange={val => setIdentityForm({ ...identityForm, expiry: val })}
+          />
+        </div>
+      </Modal>
+
+      <Modal isOpen={activeModal === 'avatar'} onClose={() => setActiveModal(null)} onConfirm={handleUpdateAvatar} title="修改头像">
+        <div className="space-y-4">
+          <div className="flex justify-center mb-4">
+            <div className="w-24 h-24 rounded-full bg-gray-100 border-4 border-white shadow-lg overflow-hidden">
+              <img 
+                src={avatarUrlInput || client.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`} 
+                alt="preview" 
+                className="w-full h-full object-cover"
+              />
+            </div>
+          </div>
+          <InputField 
+            label="头像 URL" 
+            placeholder="请输入图片 URL (支持 http/https)" 
+            value={avatarUrlInput}
+            onChange={val => setAvatarUrlInput(val)}
+          />
+          <p className="text-xs text-gray-400 text-center">
+            留空则使用默认生成的卡通头像
+          </p>
         </div>
       </Modal>
     </div>

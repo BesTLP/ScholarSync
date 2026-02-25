@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Layout from './components/Layout';
 import FacultyMatcher from './components/FacultyMatcher';
 import Dashboard from './components/Dashboard';
@@ -14,8 +14,9 @@ import CVWorkbench from './components/CVWorkbench';
 import LORWorkbench from './components/LORWorkbench';
 import AIShieldWorkbench from './components/AIShieldWorkbench';
 import CreateClientModal from './components/CreateClientModal';
+import FacultyDatabase from './components/FacultyDatabase';
 import { TabId } from './components/Sidebar';
-import { Client } from './types';
+import { Client, FacultyRecord, FacultyMember } from './types';
 import { Construction } from 'lucide-react';
 
 const ComingSoon = ({ title }: { title: string }) => (
@@ -31,23 +32,108 @@ const ComingSoon = ({ title }: { title: string }) => (
 );
 
 function App() {
-  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  // Initialize state from localStorage or defaults
+  const [activeTab, setActiveTab] = useState<TabId>(() => {
+    try {
+      return (localStorage.getItem('scholarsync_activeTab') as TabId) || 'dashboard';
+    } catch (e) {
+      console.error('LocalStorage access failed:', e);
+      return 'dashboard';
+    }
+  });
+
+  const [clients, setClients] = useState<Client[]>(() => {
+    try {
+      const savedClients = localStorage.getItem('scholarsync_clients');
+      return savedClients ? JSON.parse(savedClients) : [
+        { id: '1', name: '段', status: 'active', createdAt: '2026/02/21', advisor: '未分配', contact: '暂无联系方式' },
+        { id: '2', name: '李同学 - 斯坦福申请', status: 'active', createdAt: '2024-03-15', advisor: '王老师' },
+      ];
+    } catch (e) {
+      console.error('LocalStorage access failed:', e);
+      return [
+        { id: '1', name: '段', status: 'active', createdAt: '2026/02/21', advisor: '未分配', contact: '暂无联系方式' },
+        { id: '2', name: '李同学 - 斯坦福申请', status: 'active', createdAt: '2024-03-15', advisor: '王老师' },
+      ];
+    }
+  });
+
+  const [facultyDatabase, setFacultyDatabase] = useState<FacultyRecord[]>(() => {
+    try {
+      const savedDB = localStorage.getItem('scholarsync_faculty_db');
+      return savedDB ? JSON.parse(savedDB) : [];
+    } catch (e) {
+      console.error('LocalStorage access failed:', e);
+      return [];
+    }
+  });
+
+  const [selectedClient, setSelectedClient] = useState<Client | null>(() => {
+    try {
+      const savedClientId = localStorage.getItem('scholarsync_selectedClientId');
+      if (savedClientId) {
+        const savedClientsStr = localStorage.getItem('scholarsync_clients');
+        const initialClients = savedClientsStr ? JSON.parse(savedClientsStr) : [
+          { id: '1', name: '段', status: 'active', createdAt: '2026/02/21', advisor: '未分配', contact: '暂无联系方式' },
+          { id: '2', name: '李同学 - 斯坦福申请', status: 'active', createdAt: '2024-03-15', advisor: '王老师' },
+        ];
+        return initialClients.find((c: Client) => c.id === savedClientId) || null;
+      }
+    } catch (e) {
+      console.error('LocalStorage access failed:', e);
+    }
+    return null;
+  });
+
   const [isCreateClientModalOpen, setIsCreateClientModalOpen] = useState(false);
   const [editingDocument, setEditingDocument] = useState<{ id: string; content: string; type: string; title: string } | null>(null);
-  const [clients, setClients] = useState<Client[]>([
-    { id: '1', name: '段', status: 'active', createdAt: '2026/02/21', advisor: '未分配', contact: '暂无联系方式' },
-    { id: '2', name: '李同学 - 斯坦福申请', status: 'active', createdAt: '2024-03-15', advisor: '王老师' },
-  ]);
+  const [clientDetailInitialTab, setClientDetailInitialTab] = useState<'profile' | 'documents'>('profile');
 
-  const addClient = (name: string) => {
+  // Persistence Effects
+  useEffect(() => {
+    try {
+      localStorage.setItem('scholarsync_activeTab', activeTab);
+    } catch (e) {
+      console.error('LocalStorage write failed:', e);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('scholarsync_clients', JSON.stringify(clients));
+    } catch (e) {
+      console.error('LocalStorage write failed:', e);
+    }
+  }, [clients]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('scholarsync_faculty_db', JSON.stringify(facultyDatabase));
+    } catch (e) {
+      console.error('LocalStorage write failed:', e);
+    }
+  }, [facultyDatabase]);
+
+  useEffect(() => {
+    try {
+      if (selectedClient) {
+        localStorage.setItem('scholarsync_selectedClientId', selectedClient.id);
+      } else {
+        localStorage.removeItem('scholarsync_selectedClientId');
+      }
+    } catch (e) {
+      console.error('LocalStorage write failed:', e);
+    }
+  }, [selectedClient]);
+
+  const addClient = (clientData: Partial<Client> & { name: string }) => {
     const newClient: Client = {
       id: Math.random().toString(36).substr(2, 9),
-      name,
       status: 'active',
-      createdAt: new Date().toISOString().split('T')[0].replace(/-/g, '/'),
+      createdAt: new Date().toISOString().split('T')[0], // YYYY-MM-DD
       advisor: '未分配',
-      contact: '暂无联系方式'
+      contact: '暂无联系方式',
+      ...clientData
     };
     setClients([...clients, newClient]);
   };
@@ -56,6 +142,132 @@ function App() {
     setClients(clients.map(c => c.id === updatedClient.id ? updatedClient : c));
     if (selectedClient?.id === updatedClient.id) {
       setSelectedClient(updatedClient);
+    }
+  };
+
+  // Faculty Database Operations
+  const addFacultyToDatabase = (faculty: FacultyMember, country: string, fieldCategory: string): string => {
+    // Check for duplicates (Name + University)
+    const existing = facultyDatabase.find(f => 
+      f.name.toLowerCase() === faculty.name.toLowerCase() && 
+      f.university.toLowerCase() === faculty.university.toLowerCase()
+    );
+
+    if (existing) {
+      // Update existing
+      const updatedRecord: FacultyRecord = {
+        ...existing,
+        ...faculty, // Overwrite with new data
+        updatedAt: new Date().toISOString(),
+        source: 'search'
+      };
+      setFacultyDatabase(facultyDatabase.map(f => f.id === existing.id ? updatedRecord : f));
+      return existing.id;
+    }
+
+    const newId = crypto.randomUUID();
+    const newRecord: FacultyRecord = {
+      ...faculty,
+      id: newId,
+      country,
+      fieldCategory,
+      addedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      source: 'search',
+      linkedClientIds: []
+    };
+    setFacultyDatabase([...facultyDatabase, newRecord]);
+    return newId;
+  };
+
+  const updateFacultyRecord = (id: string, updates: Partial<FacultyRecord>) => {
+    setFacultyDatabase(facultyDatabase.map(f => 
+      f.id === id ? { ...f, ...updates, updatedAt: new Date().toISOString() } : f
+    ));
+  };
+
+  const deleteFacultyRecord = (id: string) => {
+    // 1. Remove from database
+    setFacultyDatabase(facultyDatabase.filter(f => f.id !== id));
+    
+    // 2. Remove references from clients
+    const updatedClients = clients.map(client => {
+      if (client.linkedFacultyIds?.includes(id)) {
+        return {
+          ...client,
+          linkedFacultyIds: client.linkedFacultyIds.filter(fid => fid !== id)
+        };
+      }
+      return client;
+    });
+    setClients(updatedClients);
+    
+    // Update selected client if needed
+    if (selectedClient && selectedClient.linkedFacultyIds?.includes(id)) {
+      setSelectedClient({
+        ...selectedClient,
+        linkedFacultyIds: selectedClient.linkedFacultyIds?.filter(fid => fid !== id)
+      });
+    }
+  };
+
+  const linkFacultyToClient = (facultyId: string, clientId: string) => {
+    // 1. Update Faculty Record
+    setFacultyDatabase(prev => prev.map(f => {
+      if (f.id === facultyId) {
+        const currentLinks = f.linkedClientIds || [];
+        if (!currentLinks.includes(clientId)) {
+          return { ...f, linkedClientIds: [...currentLinks, clientId] };
+        }
+      }
+      return f;
+    }));
+
+    // 2. Update Client Record
+    const updatedClients = clients.map(c => {
+      if (c.id === clientId) {
+        const currentLinks = c.linkedFacultyIds || [];
+        if (!currentLinks.includes(facultyId)) {
+          return { ...c, linkedFacultyIds: [...currentLinks, facultyId] };
+        }
+      }
+      return c;
+    });
+    setClients(updatedClients);
+
+    // Update selected client if needed
+    if (selectedClient?.id === clientId) {
+      const currentLinks = selectedClient.linkedFacultyIds || [];
+      if (!currentLinks.includes(facultyId)) {
+        setSelectedClient({ ...selectedClient, linkedFacultyIds: [...currentLinks, facultyId] });
+      }
+    }
+  };
+
+  const unlinkFacultyFromClient = (facultyId: string, clientId: string) => {
+    // 1. Update Faculty Record
+    setFacultyDatabase(prev => prev.map(f => {
+      if (f.id === facultyId) {
+        return { ...f, linkedClientIds: (f.linkedClientIds || []).filter(cid => cid !== clientId) };
+      }
+      return f;
+    }));
+
+    // 2. Update Client Record
+    const updatedClients = clients.map(c => {
+      if (c.id === clientId) {
+        return { ...c, linkedFacultyIds: (c.linkedFacultyIds || []).filter(fid => fid !== facultyId) };
+      }
+      return c;
+    });
+    setClients(updatedClients);
+
+    // Update selected client if needed
+    if (selectedClient?.id === clientId) {
+      setSelectedClient({
+        ...selectedClient,
+        linkedFacultyIds: (selectedClient.linkedFacultyIds || []).filter(fid => fid !== facultyId)
+      });
     }
   };
 
@@ -112,6 +324,7 @@ function App() {
         <ClientDetail 
           client={selectedClient} 
           onBack={() => setSelectedClient(null)} 
+          initialTab={clientDetailInitialTab}
           onStartWriting={(type) => {
             const tabMap: Record<string, TabId> = {
               '文书Agent': 'agent',
@@ -144,50 +357,98 @@ function App() {
             setActiveTab(typeMap[doc.type] || 'freewrite');
           }}
           onUpdateClient={updateClient}
+          facultyDatabase={facultyDatabase}
+          onLinkFacultyToClient={linkFacultyToClient}
+          onUnlinkFacultyFromClient={unlinkFacultyFromClient}
+          onTabChange={setActiveTab}
         />
       );
     }
 
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard onTabChange={setActiveTab} clients={clients} onSelectClient={(c) => { setSelectedClient(c); setActiveTab('users'); }} />;
+        return <Dashboard onTabChange={setActiveTab} clients={clients} onSelectClient={(c) => { setSelectedClient(c); setClientDetailInitialTab('profile'); setActiveTab('users'); }} />;
       case 'faculty-matcher':
         return (
-          <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
-            <FacultyMatcher />
-          </div>
+          <FacultyMatcher 
+            clients={clients}
+            selectedClient={selectedClient}
+            facultyDatabase={facultyDatabase}
+            onAddFacultyToDatabase={addFacultyToDatabase}
+            onLinkFacultyToClient={linkFacultyToClient}
+            onUpdateClient={updateClient}
+          />
+        );
+      case 'faculty-db':
+        return (
+          <FacultyDatabase 
+            facultyDatabase={facultyDatabase}
+            clients={clients}
+            onAddFaculty={addFacultyToDatabase}
+            onUpdateFaculty={updateFacultyRecord}
+            onDeleteFaculty={deleteFacultyRecord}
+            onLinkFaculty={linkFacultyToClient}
+            onUnlinkFaculty={unlinkFacultyFromClient}
+          />
         );
       case 'users':
-        return <ClientArchives clients={clients} onAddClient={addClient} onSelectClient={setSelectedClient} />;
+        return <ClientArchives clients={clients} onAddClient={(name, parsedData) => addClient({ name, ...parsedData })} onSelectClient={(c) => { setSelectedClient(c); setClientDetailInitialTab('profile'); }} />;
       case 'projects':
-        return <MyWorks clients={clients} onCreateNew={() => setActiveTab('freewrite')} />;
+        return (
+          <MyWorks 
+            clients={clients} 
+            onCreateNew={() => setActiveTab('freewrite')} 
+            onEditDocument={(doc) => {
+              const typeMap: Record<string, TabId> = {
+                'PS': 'ps',
+                'Essay': 'essay',
+                'LOR': 'lor',
+                'CV': 'cv',
+                'Free Writing': 'freewrite'
+              };
+              setEditingDocument({
+                id: doc.id,
+                content: doc.content,
+                type: doc.type,
+                title: doc.title
+              });
+              // Find client for this doc to set selectedClient
+              const client = clients.find(c => c.documents?.some(d => d.id === doc.id));
+              if (client) setSelectedClient(client);
+              
+              setActiveTab(typeMap[doc.type] || 'freewrite');
+            }}
+            onTabChange={setActiveTab}
+          />
+        );
       case 'agent':
         return (
           <EssayAgentEntry 
             clients={clients} 
-            onAddClient={addClient} 
+            onAddClient={(name, parsedData) => addClient({ name, ...parsedData })} 
             onSelectClient={(client) => {
               setSelectedClient(client);
+              setClientDetailInitialTab('documents');
               setActiveTab('users');
             }} 
           />
         );
       case 'ps':
-        return <PSWorkbench clients={clients} onAddClientClick={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'PS' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} />;
+        return <PSWorkbench clients={clients} onAddClientClick={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'PS' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />;
       case 'essay':
-        return <PromptEssayWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'Essay' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} />;
+        return <PromptEssayWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'Essay' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />;
       case 'lor':
-        return <LORWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'LOR' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} />;
+        return <LORWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'LOR' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />;
       case 'cv':
-        return <CVWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'CV' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} />;
+        return <CVWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'CV' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />;
       case 'freewrite':
-        return <FreeWriteWorkbench clients={clients} onTabChange={setActiveTab} onAddClientClick={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'Free Writing' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} />;
+        return <FreeWriteWorkbench clients={clients} onTabChange={setActiveTab} onAddClientClick={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'Free Writing' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />;
       case 'ai-shield':
-        return <AIShieldWorkbench clients={clients} />;
+        return <AIShieldWorkbench clients={clients} onSaveDocument={saveDocument} initialClientId={selectedClient?.id} onBack={() => setActiveTab('users')} />;
       case 'settings':
         return <ComingSoon title="设置" />;
       default:
-        return <Dashboard onTabChange={setActiveTab} />;
+        return <Dashboard onTabChange={setActiveTab} clients={clients} onSelectClient={(c) => { setSelectedClient(c); setClientDetailInitialTab('profile'); setActiveTab('users'); }} />;
     }
   };
 
@@ -197,7 +458,7 @@ function App() {
       <CreateClientModal 
         isOpen={isCreateClientModalOpen}
         onClose={() => setIsCreateClientModalOpen(false)}
-        onConfirm={addClient}
+        onConfirm={(name, parsedData) => addClient({ name, ...parsedData })}
       />
     </Layout>
   );

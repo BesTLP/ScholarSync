@@ -1,13 +1,16 @@
 import React from 'react';
 import { FileText, Plus, ChevronRight, Clock, User } from 'lucide-react';
 import { Client } from '../types';
+import { TabId } from './Sidebar';
 
 interface MyWorksProps {
   clients: Client[];
   onCreateNew: () => void;
+  onEditDocument?: (doc: any) => void;
+  onTabChange?: (tab: TabId) => void;
 }
 
-const MyWorks: React.FC<MyWorksProps> = ({ clients, onCreateNew }) => {
+const MyWorks: React.FC<MyWorksProps> = ({ clients, onCreateNew, onEditDocument, onTabChange }) => {
   const allDocuments = clients.flatMap(client => 
     (client.documents || []).map(doc => ({
       ...doc,
@@ -16,11 +19,17 @@ const MyWorks: React.FC<MyWorksProps> = ({ clients, onCreateNew }) => {
     }))
   ).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
+  const handleViewDetails = (doc: any) => {
+    if (onEditDocument) {
+      onEditDocument(doc);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#F7F8FA] p-8">
       {/* Breadcrumbs */}
       <nav className="flex items-center space-x-2 text-xs font-medium mb-8">
-        <span className="text-gray-400">EduPro</span>
+        <span className="text-gray-400">留学咩</span>
         <ChevronRight size={12} className="text-gray-300" />
         <button className="text-cyan-600 hover:text-cyan-700 transition-colors">我的作品</button>
       </nav>
@@ -63,7 +72,10 @@ const MyWorks: React.FC<MyWorksProps> = ({ clients, onCreateNew }) => {
                       <Clock size={12} className="mr-1.5" />
                       {new Date(doc.updatedAt).toLocaleDateString()}
                     </div>
-                    <button className="text-xs font-bold text-cyan-600 hover:text-cyan-700 transition-colors">
+                    <button 
+                      onClick={() => handleViewDetails(doc)}
+                      className="text-xs font-bold text-cyan-600 hover:text-cyan-700 transition-colors"
+                    >
                       查看详情
                     </button>
                   </div>

@@ -8,7 +8,8 @@ import {
   ChevronRight,
   ChevronLeft,
   Moon,
-  Loader2
+  Loader2,
+  X
 } from 'lucide-react';
 import { Client } from '../types';
 import EditorWorkspace from './EditorWorkspace';
@@ -142,18 +143,31 @@ const CVWorkbench: React.FC<{
   onSaveDocument: (clientId: string, document: { id?: string; title: string; type: string; content: string }) => string | undefined;
   initialDocument?: { id: string; content: string; title: string };
   onBack: () => void;
-}> = ({ clients, onAddClient, onSaveDocument, initialDocument, onBack }) => {
-  const [selectedClientId, setSelectedClientId] = useState<string>('');
+  initialClientId?: string;
+}> = ({ clients, onAddClient, onSaveDocument, initialDocument, onBack, initialClientId }) => {
+  const [selectedClientId, setSelectedClientId] = useState<string>(initialClientId || '');
   const [isCreativeMode, setIsCreativeMode] = useState(false);
   const [documentContent, setDocumentContent] = useState<string>(initialDocument?.content || '');
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentDocId, setCurrentDocId] = useState<string | undefined>(initialDocument?.id);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Save Modal State
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [documentTitle, setDocumentTitle] = useState('');
+
+  useEffect(() => {
+    if (initialClientId) {
+      setSelectedClientId(initialClientId);
+    }
+  }, [initialClientId]);
 
   useEffect(() => {
     if (initialDocument) {
       setDocumentContent(initialDocument.content);
       setCurrentDocId(initialDocument.id);
+      setDocumentTitle(initialDocument.title);
     }
   }, [initialDocument]);
 
@@ -171,7 +185,10 @@ const CVWorkbench: React.FC<{
         instructions: isCreativeMode ? 'Use a creative and modern style.' : 'Use a standard professional style.'
       });
       setDocumentContent(result || '');
-      setCurrentDocId(undefined);
+      // Set default title if not set
+      if (!documentTitle) {
+        setDocumentTitle(`CV - ${client?.name || 'Draft'}`);
+      }
     } catch (error) {
       console.error('Failed to generate CV:', error);
     } finally {
@@ -179,22 +196,78 @@ const CVWorkbench: React.FC<{
     }
   };
 
-  const handleSave = () => {
+  const handleSaveClick = () => {
     if (!selectedClientId || !documentContent) return;
+    setShowSaveModal(true);
+  };
+
+  const handleConfirmSave = () => {
+    setIsSaving(true);
     const docId = onSaveDocument(selectedClientId, {
       id: currentDocId,
-      title: `CV - ${isCreativeMode ? 'Creative' : 'Standard'}`,
+      title: documentTitle || `CV - ${isCreativeMode ? 'Creative' : 'Standard'}`,
       type: 'CV',
       content: documentContent
     });
     
     if (docId) setCurrentDocId(docId);
+    
+    setIsSaving(false);
     setSaveSuccess(true);
+    setShowSaveModal(false);
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 
+  const handleRegenerate = () => {
+    if (confirm('重新生成将覆盖当前内容，确定要继续吗？')) {
+      handleGenerate();
+    }
+  };
+
   return (
-    <div className="flex h-screen bg-white overflow-hidden">
+    <div className="flex h-screen bg-white overflow-hidden relative">
+      {/* Save Modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowSaveModal(false)} />
+          <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl p-6 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900">保存文书</h3>
+              <button onClick={() => setShowSaveModal(false)} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">文档标题</label>
+                <input 
+                  type="text" 
+                  value={documentTitle}
+                  onChange={(e) => setDocumentTitle(e.target.value)}
+                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-cyan-500"
+                  placeholder="输入文档标题..."
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end space-x-3 pt-2">
+                <button 
+                  onClick={() => setShowSaveModal(false)}
+                  className="px-4 py-2 text-gray-500 font-bold text-sm hover:bg-gray-50 rounded-xl transition-colors"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={handleConfirmSave}
+                  className="px-6 py-2 bg-cyan-500 text-white font-bold text-sm rounded-xl hover:bg-cyan-600 shadow-lg shadow-cyan-100 transition-all"
+                >
+                  确认保存
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <CVSidebarConfig 
         clients={clients} 
         onAddClient={onAddClient} 
@@ -216,11 +289,23 @@ const CVWorkbench: React.FC<{
             >
               <ChevronLeft size={16} />
             </button>
-            <span className="text-gray-400">EduPro</span>
+            <span className="text-gray-400">留学咩</span>
             <ChevronRight size={12} className="text-gray-300" />
             <span className="text-gray-900 font-bold">写CV</span>
           </div>
           <div className="flex items-center space-x-4">
+            {saveSuccess && (
+              <div className="flex items-center text-emerald-500 text-xs font-bold mr-2 animate-in fade-in duration-300">
+                <Sparkles size={14} className="mr-1" />
+                保存成功
+              </div>
+            )}
+            <button 
+              onClick={onBack}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-xs font-bold hover:bg-gray-200 transition-all"
+            >
+              返回客户详情
+            </button>
             <button className="p-2 text-gray-400 hover:text-gray-900 transition-colors">
               <Moon size={18} />
             </button>
@@ -239,9 +324,21 @@ const CVWorkbench: React.FC<{
         <EditorWorkspace 
           value={documentContent} 
           onChange={setDocumentContent}
-          onSave={handleSave}
+          onSave={handleSaveClick}
           saveSuccess={saveSuccess}
+          previewMode={true}
         />
+
+        {/* Custom Toolbar Actions for CV (Regenerate) */}
+        <div className="absolute top-[60px] right-8 flex space-x-2">
+           <button 
+            onClick={handleRegenerate}
+            className="flex items-center px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-all border border-indigo-100"
+          >
+            <Sparkles size={14} className="mr-1.5" />
+            重新生成
+          </button>
+        </div>
       </div>
     </div>
   );

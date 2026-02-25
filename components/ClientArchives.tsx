@@ -13,7 +13,7 @@ import { Client } from '../types';
 
 interface ClientArchivesProps {
   clients: Client[];
-  onAddClient: (name: string) => void;
+  onAddClient: (name: string, parsedData?: Partial<Client>) => void;
   onSelectClient: (client: Client) => void;
 }
 
@@ -30,7 +30,7 @@ const ClientArchives: React.FC<ClientArchivesProps> = ({ clients, onAddClient, o
       <div className="flex justify-between items-start mb-8">
         <div>
           <nav className="flex items-center space-x-2 text-xs font-medium mb-3">
-            <span className="text-gray-400">EduPro</span>
+            <span className="text-gray-400">留学咩</span>
             <ChevronRight size={12} className="text-gray-300" />
             <button className="text-cyan-600 hover:text-cyan-700 transition-colors">客户</button>
           </nav>
