@@ -162,7 +162,7 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
   let promptContent = `
     Role: You are a rigorous Academic Admissions Auditor. Your goal is to find high-quality faculty matches with VERIFIED admissions data.
     
-    **CURRENT DATE CONTEXT**: Today is Feb 10, 2026.
+    **CURRENT DATE CONTEXT**: Today is ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}.
     **DEADLINE REQUIREMENT**: You MUST look for future deadlines (Spring 2027 or Fall 2027). Do NOT return past dates from 2024/2025 unless no other info is available.
 
     User Inputs:
@@ -368,6 +368,37 @@ export const getFastResponse = async (query: string): Promise<string> => {
     contents: query,
   });
   return response.text || "";
+};
+
+export const reduceAIDetection = async (content: string, mode: 'standard' | 'deep' = 'standard'): Promise<string> => {
+  const ai = getClient();
+  const prompt = `
+    Task: Rewrite the following academic essay to reduce AI detection while preserving meaning, tone, and academic quality.
+    
+    Mode: ${mode === 'deep' ? 'Deep Humanization - Simulate natural human writing patterns, vary sentence length significantly, add occasional informal touches, use specific rather than generic language.' : 'Standard - Balance naturalness with academic rigor.'}
+    
+    Rules:
+    1. Preserve the core arguments and evidence.
+    2. Vary sentence structure: mix short punchy sentences with longer complex ones.
+    3. Replace generic phrases with specific, personal language.
+    4. Avoid AI clichés: "delve into", "it is worth noting", "in conclusion", "furthermore", "tapestry".
+    5. Add natural imperfections: occasional parenthetical asides, rhetorical questions.
+    6. Maintain academic vocabulary but reduce formulaic transitions.
+    
+    Original Text:
+    """
+    ${content}
+    """
+    
+    Return ONLY the rewritten text. Do not include any explanation or metadata.
+  `;
+  
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: prompt,
+  });
+  
+  return response.text || content;
 };
 
 export async function generatePSOutline(params: {
@@ -717,7 +748,7 @@ export const parseClientFile = async (fileData: string, mimeType: string = 'text
     }
 
     const prompt = `
-      Extract student information from the following resume/document content and return it as a JSON object matching the Client interface structure.
+      Extract student information and faculty selection requirements from the following resume/document content and return it as a JSON object matching the Client interface structure.
       
       Document Content:
       """
@@ -743,11 +774,30 @@ export const parseClientFile = async (fileData: string, mimeType: string = 'text
           { "title": "...", "journal": "...", "date": "...", "link": "..." }
         ],
         "skillsAndQualities": "...",
-        "interests": "..."
+        "interests": "...",
+        "targetCountries": "意向国家",
+        "targetUniversities": "意向院校",
+        "targetDepartment": "专业范围",
+        "entryYear": "入学年份",
+        "scholarshipRequirement": "奖学金要求",
+        "exclusions": "排除项/避开院校",
+        "rankingPreference": "排名偏好",
+        "acceptCrossDiscipline": true/false,
+        "specialRequirements": "特殊需求",
+        "hasRP": true/false,
+        "hasCV": true/false,
+        "hasPublications": true/false,
+        "rpTopic": "RP题目",
+        "businessCoordinator": "业务负责人",
+        "selectionType": "择导类型",
+        "selectionCount": 10,
+        "selectionDeadline": "DDL日期",
+        "avoidPreviousMentors": "是否避开之前导师"
       }
       
-      If a field is not found, omit it or use empty strings.
+      If a field is not found, omit it or use null/undefined.
       Dates should be in YYYY-MM-DD format if possible.
+      For boolean fields like hasRP, hasCV, acceptCrossDiscipline, infer from text (e.g., "有RP" -> true, "能接受交叉" -> true).
     `;
     
     contents = prompt;
@@ -766,7 +816,7 @@ export const parseClientFile = async (fileData: string, mimeType: string = 'text
           }
         },
         {
-          text: `Extract student information from the provided document and return it as a JSON object matching the Client interface structure.
+          text: `Extract student information and faculty selection requirements from the provided document and return it as a JSON object matching the Client interface structure.
           
           Output JSON Structure:
           {
@@ -787,11 +837,30 @@ export const parseClientFile = async (fileData: string, mimeType: string = 'text
               { "title": "...", "journal": "...", "date": "...", "link": "..." }
             ],
             "skillsAndQualities": "...",
-            "interests": "..."
+            "interests": "...",
+            "targetCountries": "意向国家",
+            "targetUniversities": "意向院校",
+            "targetDepartment": "专业范围",
+            "entryYear": "入学年份",
+            "scholarshipRequirement": "奖学金要求",
+            "exclusions": "排除项/避开院校",
+            "rankingPreference": "排名偏好",
+            "acceptCrossDiscipline": true/false,
+            "specialRequirements": "特殊需求",
+            "hasRP": true/false,
+            "hasCV": true/false,
+            "hasPublications": true/false,
+            "rpTopic": "RP题目",
+            "businessCoordinator": "业务负责人",
+            "selectionType": "择导类型",
+            "selectionCount": 10,
+            "selectionDeadline": "DDL日期",
+            "avoidPreviousMentors": "是否避开之前导师"
           }
           
-          If a field is not found, omit it or use empty strings.
-          Dates should be in YYYY-MM-DD format if possible.`
+          If a field is not found, omit it or use null/undefined.
+          Dates should be in YYYY-MM-DD format if possible.
+          For boolean fields like hasRP, hasCV, acceptCrossDiscipline, infer from text (e.g., "有RP" -> true, "能接受交叉" -> true).`
         }
       ]
     };

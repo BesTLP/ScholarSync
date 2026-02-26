@@ -14,6 +14,7 @@ import {
   ChevronLeft
 } from 'lucide-react';
 import { Client } from '../types';
+import { reduceAIDetection } from '../services/geminiService';
 
 interface AIShieldSidebarProps {
   clients: Client[];
@@ -23,6 +24,8 @@ interface AIShieldSidebarProps {
   onSelectDoc: (id: string) => void;
   processState: 'idle' | 'processing' | 'success';
   onStart: () => void;
+  modelType: string;
+  onModelTypeChange: (type: string) => void;
 }
 
 const AIShieldSidebar: React.FC<AIShieldSidebarProps> = ({ 
@@ -32,11 +35,12 @@ const AIShieldSidebar: React.FC<AIShieldSidebarProps> = ({
   selectedDocId, 
   onSelectDoc,
   processState,
-  onStart
+  onStart,
+  modelType,
+  onModelTypeChange
 }) => {
   const [showClientSelect, setShowClientSelect] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [modelType, setModelType] = useState('standard');
 
   const selectedClient = clients.find(c => c.id === selectedClientId);
   const filteredClients = clients.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -131,7 +135,7 @@ const AIShieldSidebar: React.FC<AIShieldSidebarProps> = ({
             ].map(m => (
               <button
                 key={m.id}
-                onClick={() => setModelType(m.id)}
+                onClick={() => onModelTypeChange(m.id)}
                 className={`text-left p-3 rounded-xl border transition-all ${
                   modelType === m.id 
                     ? 'border-violet-500 bg-violet-50 ring-1 ring-violet-500' 
@@ -178,6 +182,7 @@ const AIShieldWorkbench: React.FC<{
   const [selectedDocId, setSelectedDocId] = useState('');
   const [processState, setProcessState] = useState<'idle' | 'processing' | 'success'>('idle');
   const [content, setContent] = useState('');
+  const [modelType, setModelType] = useState('standard');
   const [showConfirm, setShowConfirm] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -198,12 +203,17 @@ const AIShieldWorkbench: React.FC<{
     }
   }, [selectedClientId, selectedDocId, clients]);
 
-  const handleStart = () => {
+  const handleStart = async () => {
     setProcessState('processing');
-    setTimeout(() => {
+    try {
+      const result = await reduceAIDetection(content, modelType as 'standard' | 'deep');
+      setContent(result);
       setProcessState('success');
-      setContent(prev => `[已降AI处理] ${prev}\n\n处理后的文本更加自然，模拟了人类的语气和句式结构...`);
-    }, 2000);
+    } catch (error) {
+      console.error('降AI处理失败:', error);
+      setProcessState('idle');
+      alert('降AI处理失败，请稍后重试');
+    }
   };
 
   const handleSaveAsCopy = () => {
@@ -258,6 +268,8 @@ const AIShieldWorkbench: React.FC<{
         onSelectDoc={setSelectedDocId}
         processState={processState}
         onStart={handleStart}
+        modelType={modelType}
+        onModelTypeChange={setModelType}
       />
       
       <div className="flex-1 flex flex-col min-w-0 relative h-full bg-gray-50/30">

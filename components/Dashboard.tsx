@@ -27,7 +27,6 @@ import {
 } from 'lucide-react';
 import { TabId } from './Sidebar';
 import { Client } from '../types';
-import ChatBot from './ChatBot';
 
 // --- Sub-components ---
 
@@ -82,60 +81,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange, clients, onSelectCli
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Client[]>([]);
 
-  // ChatBot State
-  const [showChatBot, setShowChatBot] = useState(false);
-  const [isChatBotMinimized, setIsChatBotMinimized] = useState(false);
-  const [chatBotPosition, setChatBotPosition] = useState({ x: window.innerWidth - 420, y: window.innerHeight - 650 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStartPos = useRef({ x: 0, y: 0 });
-  const chatBotRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     if (searchQuery.trim()) {
       const results = clients.filter(client => 
         client.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         client.advisor?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        client.university?.toLowerCase().includes(searchQuery.toLowerCase())
+        client.university?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        client.educations?.some(edu => edu.school.toLowerCase().includes(searchQuery.toLowerCase()))
       );
       setSearchResults(results);
     } else {
       setSearchResults([]);
     }
   }, [searchQuery, clients]);
-
-  // Drag Logic
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true);
-    dragStartPos.current = {
-      x: e.clientX - chatBotPosition.x,
-      y: e.clientY - chatBotPosition.y
-    };
-  };
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        setChatBotPosition({
-          x: e.clientX - dragStartPos.current.x,
-          y: e.clientY - dragStartPos.current.y
-        });
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-    };
-
-    if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-    }
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging]);
 
   const quickActions = [
     { id: 'agent' as TabId, title: '文书 Agent', subtitle: '全流程智能文书创作', icon: Wand2, iconBg: 'bg-purple-50', iconColor: 'text-purple-600' },
@@ -217,7 +175,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange, clients, onSelectCli
         {/* Block A: Welcome */}
         <div className="flex justify-between items-end mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">👋 嗨 For River，下午好</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">👋 欢迎回来</h1>
             <p className="text-gray-500 text-sm mb-4">今天也要为学生们创造更出色的文书哦！</p>
             <div className="flex space-x-3">
               <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-600 border border-blue-100">
@@ -230,11 +188,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange, clients, onSelectCli
             </div>
           </div>
           <div className="flex space-x-3">
-            <button className="flex items-center px-4 py-2 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm">
+            <button 
+              onClick={() => alert('视频演示功能即将上线')}
+              className="flex items-center px-4 py-2 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+            >
               <Play size={16} className="mr-2 text-blue-500 fill-blue-500" />
               视频演示
             </button>
-            <button className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors shadow-md shadow-blue-200">
+            <button 
+              onClick={() => onTabChange('agent')}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors shadow-md shadow-blue-200"
+            >
               <Rocket size={16} className="mr-2" />
               快速开始
             </button>
@@ -256,8 +220,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange, clients, onSelectCli
             <div>
               <div className="text-3xl font-bold text-gray-900 mb-4">1,000 句</div>
               <div className="flex space-x-2">
-                <button className="flex-1 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors">充值</button>
-                <button className="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg hover:bg-gray-200 transition-colors">使用记录</button>
+                <button 
+                  onClick={() => alert('充值功能即将上线')}
+                  className="flex-1 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  充值
+                </button>
+                <button 
+                  onClick={() => alert('使用记录功能即将上线')}
+                  className="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  使用记录
+                </button>
               </div>
             </div>
           </div>
@@ -268,7 +242,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange, clients, onSelectCli
           <div className="col-span-2">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-gray-900">快速操作</h3>
-              <button className="text-blue-600 text-sm font-medium hover:underline">管理功能</button>
+              <span className="text-gray-400 text-sm font-medium">管理功能</span>
             </div>
             <div className="grid grid-cols-2 gap-4">
               {quickActions.map((action) => (
@@ -382,64 +356,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange, clients, onSelectCli
           </div>
         </div>
       </div>
-
-      {/* Floating AI Assistant */}
-      {!showChatBot && (
-        <button 
-          onClick={() => setShowChatBot(true)}
-          className="fixed bottom-8 right-8 w-14 h-14 bg-green-500 text-white rounded-full shadow-2xl shadow-green-200 flex items-center justify-center hover:scale-110 transition-transform z-50"
-        >
-          <MessageCircle size={28} />
-        </button>
-      )}
-
-      {/* Draggable ChatBot Window */}
-      {showChatBot && (
-        <div 
-          ref={chatBotRef}
-          style={{ 
-            position: 'fixed', 
-            left: chatBotPosition.x, 
-            top: chatBotPosition.y,
-            width: isChatBotMinimized ? '300px' : '400px',
-            height: isChatBotMinimized ? 'auto' : '600px',
-            zIndex: 100
-          }}
-          className="bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden transition-all duration-200"
-        >
-          {/* Draggable Header */}
-          <div 
-            onMouseDown={handleMouseDown}
-            className="h-10 bg-gray-50 border-b border-gray-100 flex items-center justify-between px-4 cursor-move select-none"
-          >
-            <div className="flex items-center space-x-2 text-gray-500">
-              <GripHorizontal size={16} />
-              <span className="text-xs font-bold">学术助手</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <button 
-                onClick={() => setIsChatBotMinimized(!isChatBotMinimized)}
-                className="p-1 hover:bg-gray-200 rounded text-gray-400 hover:text-gray-600"
-              >
-                {isChatBotMinimized ? <Maximize2 size={14} /> : <Minimize2 size={14} />}
-              </button>
-              <button 
-                onClick={() => setShowChatBot(false)}
-                className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-500"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          </div>
-
-          {/* ChatBot Content */}
-          {!isChatBotMinimized && (
-            <div className="flex-1 overflow-hidden">
-              <ChatBot />
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 };

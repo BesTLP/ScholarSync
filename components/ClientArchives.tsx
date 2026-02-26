@@ -6,7 +6,9 @@ import {
   LayoutGrid, 
   ChevronRight,
   Search,
-  Phone
+  Phone,
+  Archive,
+  ArchiveRestore
 } from 'lucide-react';
 import CreateClientModal from './CreateClientModal';
 import { Client } from '../types';
@@ -15,9 +17,17 @@ interface ClientArchivesProps {
   clients: Client[];
   onAddClient: (name: string, parsedData?: Partial<Client>) => void;
   onSelectClient: (client: Client) => void;
+  onUpdateClient?: (client: Client) => void;
+  onRestoreClient?: (clientId: string) => void;
 }
 
-const ClientArchives: React.FC<ClientArchivesProps> = ({ clients, onAddClient, onSelectClient }) => {
+const ClientArchives: React.FC<ClientArchivesProps> = ({ 
+  clients, 
+  onAddClient, 
+  onSelectClient, 
+  onUpdateClient,
+  onRestoreClient
+}) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
@@ -111,7 +121,11 @@ const ClientArchives: React.FC<ClientArchivesProps> = ({ clients, onAddClient, o
                 <div>
                   <div className="flex items-center space-x-2">
                     <h4 className="font-bold text-gray-900">{client.name}</h4>
-                    <span className="text-[10px] text-gray-400">未知</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                      client.status === 'active' ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-500'
+                    }`}>
+                      {client.status === 'active' ? '服务中' : '已归档'}
+                    </span>
                   </div>
                   <div className="flex items-center text-[10px] text-gray-400 mt-1">
                     <Phone size={10} className="mr-1" />
@@ -120,9 +134,24 @@ const ClientArchives: React.FC<ClientArchivesProps> = ({ clients, onAddClient, o
                 </div>
               </div>
               <div className="flex flex-col items-end">
-                <button className="p-2 text-gray-300 hover:text-gray-600 transition-colors">
-                  <ChevronRight size={20} />
-                </button>
+                <div className="flex items-center space-x-2">
+                  {activeTab === 'archived' && onRestoreClient && (
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRestoreClient(client.id);
+                      }}
+                      className="p-2 text-cyan-500 hover:bg-cyan-50 rounded-lg transition-all flex items-center text-[10px] font-bold"
+                      title="恢复到服务中"
+                    >
+                      <ArchiveRestore size={14} className="mr-1" />
+                      恢复
+                    </button>
+                  )}
+                  <button className="p-2 text-gray-300 hover:text-gray-600 transition-colors">
+                    <ChevronRight size={20} />
+                  </button>
+                </div>
                 <span className="text-[10px] text-gray-300 mt-2">{client.createdAt}</span>
               </div>
             </div>

@@ -3,6 +3,7 @@ import { FacultyRecord, FacultyMember, Client } from '../types';
 import FacultyCard from './FacultyCard';
 import FacultySearchModal from './FacultySearchModal';
 import FacultyManualEntryModal from './FacultyManualEntryModal';
+import { refreshFacultyData } from '../services/geminiService';
 import { 
   Search, 
   Filter, 
@@ -17,7 +18,9 @@ import {
   ChevronRight,
   Database,
   UserPlus,
-  X
+  X,
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
 
 interface FacultyDatabaseProps {
@@ -48,6 +51,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isManualEntryModalOpen, setIsManualEntryModalOpen] = useState(false);
   const [linkingFacultyId, setLinkingFacultyId] = useState<string | null>(null);
+  const [editingFaculty, setEditingFaculty] = useState<FacultyRecord | null>(null);
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
   // Derived Data for Filters
   const countries = useMemo(() => Array.from(new Set(facultyDatabase.map(f => f.country))).filter(Boolean).sort(), [facultyDatabase]);
@@ -98,9 +103,62 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
 
   const handleImportFaculty = (imported: FacultyMember[]) => {
     imported.forEach(faculty => {
-      onAddFaculty(faculty, "Unknown", "Unknown");
+      const country = faculty.matchReasoning?.locationCheck || "未分类";
+      const field = faculty.department || "未分类";
+      onAddFaculty(faculty, country, field);
     });
     alert(`成功导入 ${imported.length} 位导师`);
+  };
+
+  const handleRefreshFaculty = async (record: FacultyRecord) => {
+    setRefreshingId(record.id);
+    try {
+      const updated = await refreshFacultyData(record);
+      onUpdateFaculty(record.id, { ...updated });
+    } catch (error) {
+      console.error("Refresh failed:", error);
+    } finally {
+      setRefreshingId(null);
+    }
+  };
+
+  const handleExportCSV = () => {
+    const targetIds = selectedIds.size > 0 
+      ? Array.from(selectedIds) 
+      : filteredFaculty.map(f => f.id);
+    
+    if (targetIds.length === 0) return;
+
+    const dataToExport = facultyDatabase.filter(f => targetIds.includes(f.id));
+    
+    const BOM = "\uFEFF";
+    const headers = ["姓名", "职称", "院校", "学院/系", "邮箱", "国家/地区", "学科领域", "研究方向", "备注"];
+    const csvRows = [headers.join(",")];
+
+    dataToExport.forEach(f => {
+      const row = [
+        `"${f.name.replace(/"/g, '""')}"`,
+        `"${f.title.replace(/"/g, '""')}"`,
+        `"${f.university.replace(/"/g, '""')}"`,
+        `"${f.department.replace(/"/g, '""')}"`,
+        `"${f.email.replace(/"/g, '""')}"`,
+        `"${f.country.replace(/"/g, '""')}"`,
+        `"${f.fieldCategory.replace(/"/g, '""')}"`,
+        `"${f.researchAreas.join("; ").replace(/"/g, '""')}"`,
+        `"${(f.notes || "").replace(/"/g, '""')}"`
+      ];
+      csvRows.push(row.join(","));
+    });
+
+    const csvContent = csvRows.join("\n");
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Faculty_Database_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -236,7 +294,10 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                     <Trash2 size={14} />
                     批量删除
                   </button>
-                  <button className="flex items-center gap-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 px-2 py-1 rounded transition-colors">
+                  <button 
+                    onClick={handleExportCSV}
+                    className="flex items-center gap-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 px-2 py-1 rounded transition-colors"
+                  >
                     <Download size={14} />
                     导出 CSV
                   </button>
@@ -276,7 +337,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   {filteredFaculty.map(faculty => (
                     <div key={faculty.id} className="relative group">
                       {/* Selection Checkbox Overlay */}
-                      <div className={`absolute top-4 left-4 z-30 transition-opacity ${selectedIds.has(faculty.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                      <div className={`absolute top-3 left-3 z-30 transition-opacity ${selectedIds.has(faculty.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                         <input 
                           type="checkbox" 
                           checked={selectedIds.has(faculty.id)}
@@ -287,13 +348,21 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                       <FacultyCard 
                         prof={faculty} 
                         isDatabaseView={true}
-                        onEdit={(record) => console.log('Edit', record)}
+                        onEdit={(record) => setEditingFaculty(record)}
                         onDelete={onDeleteFaculty}
-                        onRefresh={(record) => console.log('Refresh', record)}
+                        onRefresh={handleRefreshFaculty}
                         onLink={(prof) => setLinkingFacultyId(faculty.id)}
                         onUnlink={(id) => onUnlinkFaculty(faculty.id, id)}
                         linkedClientCount={faculty.linkedClientIds?.length || 0}
                       />
+                      {refreshingId === faculty.id && (
+                        <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] z-40 flex items-center justify-center rounded-xl">
+                          <div className="flex flex-col items-center gap-2">
+                            <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                            <span className="text-xs font-bold text-blue-700">正在更新数据...</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -491,6 +560,133 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                 className="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800"
               >
                 取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Faculty Modal */}
+      {editingFaculty && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <h3 className="text-lg font-bold text-gray-900">编辑导师信息</h3>
+              <button onClick={() => setEditingFaculty(null)} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-8 space-y-6 max-h-[75vh] overflow-y-auto custom-scrollbar">
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">姓名</label>
+                  <input 
+                    type="text" 
+                    defaultValue={editingFaculty.name}
+                    id="edit-name"
+                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">职称</label>
+                  <input 
+                    type="text" 
+                    defaultValue={editingFaculty.title}
+                    id="edit-title"
+                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">院校</label>
+                  <input 
+                    type="text" 
+                    defaultValue={editingFaculty.university}
+                    id="edit-university"
+                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">学院/系</label>
+                  <input 
+                    type="text" 
+                    defaultValue={editingFaculty.department}
+                    id="edit-department"
+                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">邮箱</label>
+                  <input 
+                    type="email" 
+                    defaultValue={editingFaculty.email}
+                    id="edit-email"
+                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">国家/地区</label>
+                  <input 
+                    type="text" 
+                    defaultValue={editingFaculty.country}
+                    id="edit-country"
+                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">学科领域</label>
+                  <input 
+                    type="text" 
+                    defaultValue={editingFaculty.fieldCategory}
+                    id="edit-field"
+                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">研究方向 (逗号分隔)</label>
+                <input 
+                  type="text" 
+                  defaultValue={editingFaculty.researchAreas.join(', ')}
+                  id="edit-research"
+                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">备注</label>
+                <textarea 
+                  defaultValue={editingFaculty.notes}
+                  id="edit-notes"
+                  rows={3}
+                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none resize-none"
+                />
+              </div>
+            </div>
+            <div className="p-6 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+              <button
+                onClick={() => setEditingFaculty(null)}
+                className="px-6 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-800"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  const updates: Partial<FacultyRecord> = {
+                    name: (document.getElementById('edit-name') as HTMLInputElement).value,
+                    title: (document.getElementById('edit-title') as HTMLInputElement).value,
+                    university: (document.getElementById('edit-university') as HTMLInputElement).value,
+                    department: (document.getElementById('edit-department') as HTMLInputElement).value,
+                    email: (document.getElementById('edit-email') as HTMLInputElement).value,
+                    country: (document.getElementById('edit-country') as HTMLInputElement).value,
+                    fieldCategory: (document.getElementById('edit-field') as HTMLInputElement).value,
+                    researchAreas: (document.getElementById('edit-research') as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean),
+                    notes: (document.getElementById('edit-notes') as HTMLTextAreaElement).value,
+                  };
+                  onUpdateFaculty(editingFaculty.id, updates);
+                  setEditingFaculty(null);
+                }}
+                className="px-8 py-2.5 bg-cyan-500 text-white rounded-xl text-sm font-bold hover:bg-cyan-600 shadow-md transition-all"
+              >
+                保存修改
               </button>
             </div>
           </div>

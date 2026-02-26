@@ -15,9 +15,10 @@ import LORWorkbench from './components/LORWorkbench';
 import AIShieldWorkbench from './components/AIShieldWorkbench';
 import CreateClientModal from './components/CreateClientModal';
 import FacultyDatabase from './components/FacultyDatabase';
+import ChatBot from './components/ChatBot';
 import { TabId } from './components/Sidebar';
 import { Client, FacultyRecord, FacultyMember } from './types';
-import { Construction } from 'lucide-react';
+import { Construction, MessageCircle, GripHorizontal, Minimize2, Maximize2, X } from 'lucide-react';
 
 const ComingSoon = ({ title }: { title: string }) => (
   <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8">
@@ -41,6 +42,8 @@ function App() {
       return 'dashboard';
     }
   });
+
+  const [previousTab, setPreviousTab] = useState<TabId>('users');
 
   const [clients, setClients] = useState<Client[]>(() => {
     try {
@@ -88,6 +91,14 @@ function App() {
   const [isCreateClientModalOpen, setIsCreateClientModalOpen] = useState(false);
   const [editingDocument, setEditingDocument] = useState<{ id: string; content: string; type: string; title: string } | null>(null);
   const [clientDetailInitialTab, setClientDetailInitialTab] = useState<'profile' | 'documents'>('profile');
+
+  // ChatBot State
+  const [showChatBot, setShowChatBot] = useState(false);
+  const [isChatBotMinimized, setIsChatBotMinimized] = useState(false);
+  const [chatBotPosition, setChatBotPosition] = useState({ x: window.innerWidth - 420, y: window.innerHeight - 650 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartPos = React.useRef({ x: 0, y: 0 });
+  const chatBotRef = React.useRef<HTMLDivElement>(null);
 
   // Persistence Effects
   useEffect(() => {
@@ -142,6 +153,27 @@ function App() {
     setClients(clients.map(c => c.id === updatedClient.id ? updatedClient : c));
     if (selectedClient?.id === updatedClient.id) {
       setSelectedClient(updatedClient);
+    }
+  };
+
+  const deleteClient = (clientId: string) => {
+    // 1. Remove from clients
+    setClients(prev => prev.filter(c => c.id !== clientId));
+    
+    // 2. Clean up faculty database links
+    setFacultyDatabase(prev => prev.map(f => {
+      if (f.linkedClientIds?.includes(clientId)) {
+        return {
+          ...f,
+          linkedClientIds: f.linkedClientIds.filter(id => id !== clientId)
+        };
+      }
+      return f;
+    }));
+
+    // 3. Clear selected client if it was the one deleted
+    if (selectedClient?.id === clientId) {
+      setSelectedClient(null);
     }
   };
 
@@ -328,12 +360,49 @@ function App() {
     return newId;
   };
 
+  // Drag Logic
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    dragStartPos.current = {
+      x: e.clientX - chatBotPosition.x,
+      y: e.clientY - chatBotPosition.y
+    };
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isDragging) {
+        setChatBotPosition({
+          x: e.clientX - dragStartPos.current.x,
+          y: e.clientY - dragStartPos.current.y
+        });
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
+
   const renderContent = () => {
     if (activeTab === 'users' && selectedClient) {
       return (
         <ClientDetail 
           client={selectedClient} 
-          onBack={() => setSelectedClient(null)} 
+          onBack={() => {
+            setSelectedClient(null);
+            setActiveTab(previousTab || 'users');
+          }} 
           initialTab={clientDetailInitialTab}
           onStartWriting={(type) => {
             const tabMap: Record<string, TabId> = {
@@ -367,6 +436,7 @@ function App() {
             setActiveTab(typeMap[doc.type] || 'freewrite');
           }}
           onUpdateClient={updateClient}
+          onDeleteClient={deleteClient}
           facultyDatabase={facultyDatabase}
           onLinkFacultyToClient={linkFacultyToClient}
           onUnlinkFacultyFromClient={unlinkFacultyFromClient}
@@ -376,7 +446,18 @@ function App() {
 
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard onTabChange={setActiveTab} clients={clients} onSelectClient={(c) => { setSelectedClient(c); setClientDetailInitialTab('profile'); setActiveTab('users'); }} />;
+        return (
+          <Dashboard 
+            onTabChange={setActiveTab} 
+            clients={clients} 
+            onSelectClient={(c) => { 
+              setPreviousTab(activeTab);
+              setSelectedClient(c); 
+              setClientDetailInitialTab('profile'); 
+              setActiveTab('users'); 
+            }} 
+          />
+        );
       case 'faculty-matcher':
         return (
           <FacultyMatcher 
@@ -386,6 +467,7 @@ function App() {
             onAddFacultyToDatabase={addFacultyToDatabase}
             onLinkFacultyToClient={linkFacultyToClient}
             onUpdateClient={updateClient}
+            onAddClient={(name, parsedData) => addClient({ name, ...parsedData })}
           />
         );
       case 'faculty-db':
@@ -401,7 +483,22 @@ function App() {
           />
         );
       case 'users':
-        return <ClientArchives clients={clients} onAddClient={(name, parsedData) => addClient({ name, ...parsedData })} onSelectClient={(c) => { setSelectedClient(c); setClientDetailInitialTab('profile'); }} />;
+        return (
+          <ClientArchives 
+            clients={clients} 
+            onAddClient={(name, parsedData) => addClient({ name, ...parsedData })} 
+            onSelectClient={(c) => { 
+              setPreviousTab(activeTab);
+              setSelectedClient(c); 
+              setClientDetailInitialTab('profile'); 
+            }} 
+            onUpdateClient={updateClient}
+            onRestoreClient={(id) => {
+              const client = clients.find(c => c.id === id);
+              if (client) updateClient({ ...client, status: 'active' });
+            }}
+          />
+        );
       case 'projects':
         return (
           <MyWorks 
@@ -423,7 +520,10 @@ function App() {
               });
               // Find client for this doc to set selectedClient
               const client = clients.find(c => c.documents?.some(d => d.id === doc.id));
-              if (client) setSelectedClient(client);
+              if (client) {
+                setPreviousTab(activeTab);
+                setSelectedClient(client);
+              }
               
               setActiveTab(typeMap[doc.type] || 'freewrite');
             }}
@@ -436,6 +536,7 @@ function App() {
             clients={clients} 
             onAddClient={(name, parsedData) => addClient({ name, ...parsedData })} 
             onSelectClient={(client) => {
+              setPreviousTab(activeTab);
               setSelectedClient(client);
               setClientDetailInitialTab('documents');
               setActiveTab('users');
@@ -454,10 +555,23 @@ function App() {
         return <FreeWriteWorkbench clients={clients} onTabChange={setActiveTab} onAddClientClick={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'Free Writing' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />;
       case 'ai-shield':
         return <AIShieldWorkbench clients={clients} onSaveDocument={saveDocument} initialClientId={selectedClient?.id} onBack={() => setActiveTab('users')} />;
+      case 'share':
+        return <ComingSoon title="推广合作" />;
       case 'settings':
         return <ComingSoon title="设置" />;
       default:
-        return <Dashboard onTabChange={setActiveTab} clients={clients} onSelectClient={(c) => { setSelectedClient(c); setClientDetailInitialTab('profile'); setActiveTab('users'); }} />;
+        return (
+          <Dashboard 
+            onTabChange={setActiveTab} 
+            clients={clients} 
+            onSelectClient={(c) => { 
+              setPreviousTab(activeTab);
+              setSelectedClient(c); 
+              setClientDetailInitialTab('profile'); 
+              setActiveTab('users'); 
+            }} 
+          />
+        );
     }
   };
 
@@ -469,6 +583,64 @@ function App() {
         onClose={() => setIsCreateClientModalOpen(false)}
         onConfirm={(name, parsedData) => addClient({ name, ...parsedData })}
       />
+
+      {/* Floating AI Assistant */}
+      {!showChatBot && (
+        <button 
+          onClick={() => setShowChatBot(true)}
+          className="fixed bottom-8 right-8 w-14 h-14 bg-green-500 text-white rounded-full shadow-2xl shadow-green-200 flex items-center justify-center hover:scale-110 transition-transform z-50"
+        >
+          <MessageCircle size={28} />
+        </button>
+      )}
+
+      {/* Draggable ChatBot Window */}
+      {showChatBot && (
+        <div 
+          ref={chatBotRef}
+          style={{ 
+            position: 'fixed', 
+            left: chatBotPosition.x, 
+            top: chatBotPosition.y,
+            width: isChatBotMinimized ? '300px' : '400px',
+            height: isChatBotMinimized ? 'auto' : '600px',
+            zIndex: 100
+          }}
+          className="bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden transition-all duration-200"
+        >
+          {/* Draggable Header */}
+          <div 
+            onMouseDown={handleMouseDown}
+            className="h-10 bg-gray-50 border-b border-gray-100 flex items-center justify-between px-4 cursor-move select-none"
+          >
+            <div className="flex items-center space-x-2 text-gray-500">
+              <GripHorizontal size={16} />
+              <span className="text-xs font-bold">学术助手</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button 
+                onClick={() => setIsChatBotMinimized(!isChatBotMinimized)}
+                className="p-1 hover:bg-gray-200 rounded text-gray-400 hover:text-gray-600"
+              >
+                {isChatBotMinimized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
+              <button 
+                onClick={() => setShowChatBot(false)}
+                className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-500"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* ChatBot Content */}
+          {!isChatBotMinimized && (
+            <div className="flex-1 overflow-hidden">
+              <ChatBot />
+            </div>
+          )}
+        </div>
+      )}
     </Layout>
   );
 }

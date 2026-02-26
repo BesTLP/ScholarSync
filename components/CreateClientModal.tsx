@@ -87,57 +87,59 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       {/* Backdrop */}
       <div 
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" 
+        className="absolute inset-0 bg-black/20 backdrop-blur-md transition-opacity duration-500" 
         onClick={onClose}
       />
 
       {/* Modal Content */}
-      <div className="relative bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+      <div className="relative bg-white/90 backdrop-blur-2xl w-full max-w-lg rounded-[40px] shadow-2xl shadow-black/10 overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h3 className="text-lg font-bold text-gray-900">创建客户</h3>
+        <div className="flex items-center justify-between px-8 py-6 border-b border-gray-100/50">
+          <h3 className="text-xl font-black text-gray-900 tracking-tight">创建学生档案</h3>
           <button 
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+            className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100/50 rounded-full transition-all active:scale-90"
           >
             <X size={20} />
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-6">
+        <div className="p-8 space-y-8">
           {/* Nickname Input */}
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider ml-1">昵称</label>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">档案名称 / 昵称</label>
             <div className="relative">
               <input 
                 type="text" 
-                placeholder="输入客户昵称，仅自己可见"
+                placeholder="输入学生姓名或昵称"
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
-                className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-cyan-500 transition-all placeholder:text-gray-400"
+                className="w-full bg-gray-100/50 border-none rounded-2xl px-5 py-4 text-sm font-bold focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-gray-300 text-gray-900"
               />
             </div>
           </div>
 
           {/* Smart Archive Toggle */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-gray-900">智能建档？</span>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between px-1">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                <span className="text-sm font-black text-gray-900 tracking-tight">AI 智能建档</span>
+              </div>
               <button 
                 onClick={() => setSmartArchive(!smartArchive)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${smartArchive ? 'bg-cyan-500' : 'bg-gray-200'}`}
+                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-all focus:outline-none shadow-inner ${smartArchive ? 'bg-blue-500' : 'bg-gray-200'}`}
               >
                 <span 
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${smartArchive ? 'translate-x-6' : 'translate-x-1'}`} 
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${smartArchive ? 'translate-x-6' : 'translate-x-1'}`} 
                 />
               </button>
             </div>
             
-            <div className="bg-gray-50/50 p-4 rounded-xl border border-gray-100">
-              <h4 className="text-sm font-bold text-gray-900 mb-1">AI 智能建档</h4>
-              <p className="text-xs text-gray-500 leading-relaxed">
-                上传客户信息收集表格，自动识别内容完成学生档案建立，免手输操作
+            <div className="bg-blue-50/50 backdrop-blur-sm p-5 rounded-2xl border border-blue-100/50">
+              <p className="text-xs text-blue-800 leading-relaxed font-bold">
+                上传学生简历或信息表，AI 将自动识别并填充所有字段，为您节省手动输入时间。
               </p>
             </div>
           </div>
@@ -156,54 +158,56 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
               onDrop={handleDrop}
               onClick={() => smartArchive && fileInputRef.current?.click()}
               className={`
-                border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden
-                ${smartArchive ? 'border-cyan-200 bg-cyan-50/30' : 'border-gray-200 bg-gray-50/30 opacity-50 pointer-events-none'}
-                ${smartArchive && !isUploading && !parsedData ? 'hover:border-cyan-400 hover:bg-cyan-50/50' : ''}
+                border-2 border-dashed rounded-[32px] p-10 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden
+                ${smartArchive ? 'border-blue-200 bg-blue-50/20' : 'border-gray-200 bg-gray-50/30 opacity-50 pointer-events-none'}
+                ${smartArchive && !isUploading && !parsedData ? 'hover:border-blue-400 hover:bg-blue-50/40' : ''}
               `}
             >
               {isUploading ? (
                 <div className="flex flex-col items-center animate-pulse">
-                  <Loader2 size={32} className="text-cyan-500 animate-spin mb-3" />
-                  <p className="text-sm font-medium text-cyan-600">正在分析文档...</p>
+                  <Loader2 size={40} className="text-blue-500 animate-spin mb-4" />
+                  <p className="text-sm font-black text-blue-600 uppercase tracking-widest">正在深度解析...</p>
                 </div>
               ) : parsedData ? (
-                <div className="flex flex-col items-center">
-                  <div className="bg-green-100 text-green-600 p-3 rounded-full mb-3">
+                <div className="flex flex-col items-center animate-in zoom-in-95 duration-300">
+                  <div className="bg-emerald-500 text-white p-4 rounded-2xl shadow-lg shadow-emerald-100 mb-4">
                     <CheckCircle size={32} />
                   </div>
-                  <p className="text-sm font-bold text-green-700">解析成功！</p>
-                  <p className="text-xs text-green-600 mt-1">已自动填充信息</p>
+                  <p className="text-sm font-black text-emerald-700">解析成功！</p>
+                  <p className="text-xs text-emerald-600 mt-1 font-bold">已自动提取关键信息</p>
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
                       setParsedData(null);
                       setNickname('');
                     }}
-                    className="mt-4 text-xs text-gray-400 hover:text-gray-600 underline"
+                    className="mt-6 text-[10px] font-black text-gray-400 hover:text-gray-900 uppercase tracking-widest underline underline-offset-4"
                   >
                     重新上传
                   </button>
                 </div>
               ) : (
                 <>
-                  <div className={`p-3 rounded-xl mb-4 transition-colors ${smartArchive ? 'bg-cyan-100 text-cyan-600' : 'bg-gray-100 text-gray-400'}`}>
-                    <FileUp size={28} />
+                  <div className={`p-4 rounded-2xl mb-4 transition-all shadow-sm ${smartArchive ? 'bg-blue-100 text-blue-600 group-hover:scale-110' : 'bg-gray-100 text-gray-400'}`}>
+                    <FileUp size={32} />
                   </div>
-                  <p className="text-sm font-bold text-gray-900 mb-1">拖拽文档到这里</p>
-                  <p className="text-xs text-gray-500 mb-4">或点击选择文件</p>
-                  <p className="text-[10px] text-gray-400 font-medium">
-                    支持格式：pdf, docx, doc, txt, png, jpg, jpeg, webp
-                  </p>
+                  <p className="text-sm font-black text-gray-900 mb-1 tracking-tight">拖拽文档到这里</p>
+                  <p className="text-xs text-gray-400 mb-6 font-bold">或点击选择文件</p>
+                  <div className="flex flex-wrap justify-center gap-2 max-w-[240px]">
+                    {['PDF', 'DOCX', 'TXT', 'IMG'].map(ext => (
+                      <span key={ext} className="px-2 py-1 bg-white/50 rounded-md text-[9px] font-black text-gray-400 border border-gray-100">{ext}</span>
+                    ))}
+                  </div>
                   {uploadError && (
-                    <p className="text-xs text-red-500 mt-2 font-medium">{uploadError}</p>
+                    <p className="text-xs text-red-500 mt-4 font-black bg-red-50 px-4 py-2 rounded-full border border-red-100">{uploadError}</p>
                   )}
                 </>
               )}
             </div>
             {!smartArchive && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <span className="bg-white/80 px-3 py-1 rounded-full text-[10px] font-bold text-gray-400 border border-gray-100 shadow-sm">
-                  开启智能建档以使用上传
+                <span className="bg-white/90 backdrop-blur-md px-4 py-2 rounded-full text-[10px] font-black text-gray-400 border border-gray-100 shadow-xl">
+                  开启智能建档以解锁上传功能
                 </span>
               </div>
             )}
@@ -211,17 +215,23 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-gray-50 flex justify-end">
+        <div className="px-8 py-6 bg-gray-50/50 backdrop-blur-md flex justify-end gap-3 border-t border-gray-100/50">
+          <button 
+            onClick={onClose}
+            className="px-6 py-3 rounded-2xl text-sm font-black text-gray-500 hover:bg-gray-100 transition-all active:scale-95"
+          >
+            取消
+          </button>
           <button 
             onClick={handleConfirm}
             disabled={isUploading || !nickname.trim()}
-            className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg active:scale-95
+            className={`px-8 py-3 rounded-2xl text-sm font-black transition-all shadow-xl active:scale-95
               ${isUploading || !nickname.trim() 
                 ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none' 
-                : 'bg-cyan-500 text-white hover:bg-cyan-600 shadow-cyan-100'}
+                : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-blue-200'}
             `}
           >
-            {isUploading ? '处理中...' : '确认创建'}
+            {isUploading ? '处理中...' : '确认并创建'}
           </button>
         </div>
       </div>

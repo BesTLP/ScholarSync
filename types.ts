@@ -156,5 +156,25 @@ export interface Client {
     expiry: string;
   }>;
   avatarUrl?: string;
+  // ===== 择导需求信息 =====
+  targetCountries?: string;            // 意向国家，如 "美国、澳洲"
+  targetUniversities?: string;         // 具体意向院校描述，如 "墨尔本大学、悉尼大学；US News 30-50"
+  targetDepartment?: string;           // 专业范围，如 "public finance, 公共经济学, 税收政策"
+  entryYear?: string;                  // 入学年份，如 "27fall"、"2026年"
+  scholarshipRequirement?: string;     // 奖学金需求，如 "全奖"、"必须要奖学金"
+  exclusions?: string;                 // 排除列表，如 "避开爱丁堡大学"
+  rankingPreference?: string;          // 排名偏好，如 "QS前100, US News前50"
+  acceptCrossDiscipline?: boolean;     // 能否接受交叉学科
+  specialRequirements?: string;        // 特殊需求，如 "mphil和phd录取要求分开写"
+  hasRP?: boolean;                     // 是否有RP
+  hasCV?: boolean;                     // 是否有CV
+  hasPublications?: boolean;           // 是否有期刊发表
+  rpTopic?: string;                    // RP题目
+  // ===== 业务信息（内部用，不给学生看） =====
+  businessCoordinator?: string;        // 沟通协调专员，如 "Jennifer"
+  selectionType?: string;              // 择导类型，如 "第1轮择导"
+  selectionCount?: number;             // 择导个数
+  selectionDeadline?: string;          // DDL，如 "11.28"
+  avoidPreviousMentors?: string;       // 是否避开之前导师及详情
   linkedFacultyIds?: string[];
 }

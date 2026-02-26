@@ -34,7 +34,8 @@ import {
   Archive,
   Download,
   Link as LinkIcon,
-  UserPlus
+  UserPlus,
+  ArchiveRestore
 } from 'lucide-react';
 import { Client, FacultyRecord } from '../types';
 import FacultyCard from './FacultyCard';
@@ -49,6 +50,7 @@ interface ClientDetailProps {
   facultyDatabase?: FacultyRecord[];
   onLinkFacultyToClient?: (facultyId: string, clientId: string) => void;
   onUnlinkFacultyFromClient?: (facultyId: string, clientId: string) => void;
+  onDeleteClient?: (clientId: string) => void;
 }
 
 const Modal: React.FC<{ isOpen: boolean; onClose: () => void; onConfirm: () => void; title: string; children: React.ReactNode }> = ({ isOpen, onClose, onConfirm, title, children }) => {
@@ -124,7 +126,8 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
   initialTab = 'profile',
   facultyDatabase = [],
   onLinkFacultyToClient,
-  onUnlinkFacultyFromClient
+  onUnlinkFacultyFromClient,
+  onDeleteClient
 }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'documents' | 'mentors'>(initialTab);
   const [showWritingMenu, setShowWritingMenu] = useState(false);
@@ -283,18 +286,16 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
     setShowMoreMenu(false);
   };
 
-  const handleArchiveClient = () => {
-    onUpdateClient({ ...client, status: 'archived' });
+  const handleToggleArchive = () => {
+    const newStatus = client.status === 'archived' ? 'active' : 'archived';
+    onUpdateClient({ ...client, status: newStatus });
     setShowMoreMenu(false);
   };
 
   const handleDeleteClient = () => {
-    // In a real app, we would delete from the list. 
-    // Here we might just archive or need a onDelete callback from parent.
-    // For now, let's just alert.
     if (confirm('确定要删除该客户吗？此操作无法撤销。')) {
-      // onUpdateClient({ ...client, status: 'deleted' }); // Assuming we handle this upstream
-      alert('删除功能需在父组件实现');
+      onDeleteClient?.(client.id);
+      onBack();
     }
     setShowMoreMenu(false);
   };
@@ -365,7 +366,11 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
       <div className="min-h-[60px]">
         {items && items.length > 0 && renderItem ? (
           <div className="space-y-3">
-            {items.map(renderItem)}
+            {items.map((item, index) => (
+              <React.Fragment key={item.id || index}>
+                {renderItem(item)}
+              </React.Fragment>
+            ))}
           </div>
         ) : children || (
           <div className="flex flex-col items-center justify-center py-4 text-center">
@@ -467,9 +472,9 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
                     <Download size={14} className="mr-2" />
                     导出客户信息(JSON)
                   </button>
-                  <button onClick={handleArchiveClient} className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center">
-                    <Archive size={14} className="mr-2" />
-                    归档客户
+                  <button onClick={handleToggleArchive} className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center">
+                    {client.status === 'archived' ? <ArchiveRestore size={14} className="mr-2" /> : <Archive size={14} className="mr-2" />}
+                    {client.status === 'archived' ? '恢复到服务中' : '归档客户'}
                   </button>
                   <div className="h-px bg-gray-50 my-1" />
                   <button onClick={handleDeleteClient} className="w-full text-left px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 flex items-center">
@@ -552,7 +557,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
                           择导老师: <span className="text-cyan-600 font-bold ml-1">{client.advisor || '未分配'}</span>
                         </span>
                         <span className="text-xs text-gray-300">|</span>
-                        <span className="text-xs text-gray-400">状态: <span className="text-emerald-500 font-bold">服务中</span></span>
+                        <span className="text-xs text-gray-400">状态: <span className={client.status === 'archived' ? "text-gray-500 font-bold" : "text-emerald-500 font-bold"}>{client.status === 'archived' ? '已归档' : '服务中'}</span></span>
                       </div>
                     </div>
                   </div>
@@ -585,6 +590,76 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
 
               {/* Grid of Info Cards */}
               <div className="grid grid-cols-2 gap-6">
+                {/* 择导档案卡 */}
+                <div className="col-span-2">
+                  <InfoCard icon={ClipboardList} title="择导档案">
+                    <div className="grid grid-cols-2 gap-x-12 gap-y-2">
+                      <div className="space-y-2">
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">目标国家</span>
+                          <span className="text-xs text-gray-700 font-medium">{client.targetCountries || '未填写'}</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">意向院校</span>
+                          <span className="text-xs text-gray-700 font-medium text-right max-w-[60%]">{client.targetUniversities || '未填写'}</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">目标专业</span>
+                          <span className="text-xs text-gray-700 font-medium">{client.targetDepartment || '未填写'}</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">入学时间</span>
+                          <span className="text-xs text-gray-700 font-medium">{client.entryYear || '未填写'}</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">奖学金要求</span>
+                          <span className="text-xs text-gray-700 font-medium">{client.scholarshipRequirement || '未填写'}</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">排除项</span>
+                          <span className="text-xs text-gray-700 font-medium">{client.exclusions || '未填写'}</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">特殊要求</span>
+                          <span className="text-xs text-gray-700 font-medium text-right max-w-[60%]">{client.specialRequirements || '未填写'}</span>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">择导类型/数量</span>
+                          <span className="text-xs text-gray-700 font-medium">{client.selectionType || '未填写'} / {client.selectionCount || '0'}个</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">截止时间</span>
+                          <span className="text-xs text-gray-700 font-medium">{client.selectionDeadline || '未填写'}</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">业务负责人</span>
+                          <span className="text-xs text-gray-700 font-medium">{client.businessCoordinator || '未填写'}</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">RP/CV 状态</span>
+                          <span className="text-xs text-gray-700 font-medium">
+                            {client.hasRP ? '有RP' : '无RP'} / {client.hasCV ? '有CV' : '无CV'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">RP 题目/方向</span>
+                          <span className="text-xs text-gray-700 font-medium text-right max-w-[60%]">{client.rpTopic || '未填写'}</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">排名偏好</span>
+                          <span className="text-xs text-gray-700 font-medium">{client.rankingPreference || '未填写'}</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-gray-50">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">接受交叉学科</span>
+                          <span className="text-xs text-gray-700 font-medium">{client.acceptCrossDiscipline ? '是' : '否'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </InfoCard>
+                </div>
+
                 <InfoCard 
                   icon={BookOpen} 
                   title="教育经历" 
