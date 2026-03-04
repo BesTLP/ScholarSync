@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { FacultyMember, FacultyRecord, SourceData } from '../types';
+import { searchUniversityInfo } from '../services/geminiService';
 import { 
   Award, 
   ExternalLink, 
@@ -15,7 +16,9 @@ import {
   Pencil,
   Trash2,
   RefreshCw,
-  MoreHorizontal
+  MoreHorizontal,
+  Loader2,
+  Search
 } from 'lucide-react';
 
 interface FacultyCardProps {
@@ -76,18 +79,34 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
 
   const [imgError, setImgError] = React.useState(false);
 
+  const [admissionData, setAdmissionData] = useState<any>(null);
+  const [loadingAdmission, setLoadingAdmission] = useState(false);
+  const [admissionLoaded, setAdmissionLoaded] = useState(false);
+
+  const handleLoadAdmission = async () => {
+    setLoadingAdmission(true);
+    try {
+      const data = await searchUniversityInfo(prof.university, prof.department);
+      setAdmissionData(data);
+    } catch { /* ignore */ } 
+    finally {
+      setLoadingAdmission(false);
+      setAdmissionLoaded(true);
+    }
+  };
+
   const record = isDatabaseView ? (prof as FacultyRecord) : null;
 
   if (!prof) return null;
 
   return (
-    <div className="bg-white/80 backdrop-blur-md p-8 md:p-10 rounded-[40px] border border-white shadow-xl shadow-gray-200/30 hover:shadow-2xl hover:shadow-gray-200/50 transition-all duration-500 group relative overflow-hidden">
+    <div className="glass p-8 md:p-10 rounded-[40px] shadow-sm hover:shadow-xl transition-all duration-500 group relative overflow-hidden hover:scale-[1.01] border border-white/50">
         {/* Decorative Background Element */}
         <div className="absolute -top-24 -right-24 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl group-hover:bg-blue-500/10 transition-colors duration-500"></div>
         
         {/* QS Badge */}
         {prof.qsRanking && (
-            <div className="absolute top-6 right-6 bg-amber-400 text-white text-[10px] font-black px-3 py-1.5 rounded-full shadow-lg shadow-amber-200 z-10 flex items-center gap-1.5 uppercase tracking-wider">
+            <div className="absolute top-6 right-6 bg-gradient-to-r from-amber-400 to-orange-400 text-white text-[10px] font-black px-3 py-1.5 rounded-full shadow-md shadow-amber-200/50 z-10 flex items-center gap-1.5 uppercase tracking-wider">
                 <Award size={12} />
                 QS {prof.qsRanking}
             </div>
@@ -99,21 +118,21 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                 <>
                     <button 
                         onClick={() => onEdit?.(record)}
-                        className="p-2.5 bg-white/90 backdrop-blur-sm text-gray-500 hover:text-blue-600 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all active:scale-90"
+                        className="p-2.5 bg-white/60 backdrop-blur-sm text-gray-500 hover:text-blue-600 rounded-xl border border-white/50 shadow-sm hover:shadow-md transition-all active:scale-95"
                         title="编辑导师信息"
                     >
                         <Pencil size={16} />
                     </button>
                     <button 
                         onClick={() => onRefresh?.(record)}
-                        className="p-2.5 bg-white/90 backdrop-blur-sm text-gray-500 hover:text-emerald-600 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all active:scale-90"
+                        className="p-2.5 bg-white/60 backdrop-blur-sm text-gray-500 hover:text-emerald-600 rounded-xl border border-white/50 shadow-sm hover:shadow-md transition-all active:scale-95"
                         title="联网更新数据"
                     >
                         <RefreshCw size={16} />
                     </button>
                     <button 
                         onClick={() => onDelete?.(record.id)}
-                        className="p-2.5 bg-white/90 backdrop-blur-sm text-gray-500 hover:text-red-600 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all active:scale-90"
+                        className="p-2.5 bg-white/60 backdrop-blur-sm text-gray-500 hover:text-red-600 rounded-xl border border-white/50 shadow-sm hover:shadow-md transition-all active:scale-95"
                         title="删除导师"
                     >
                         <Trash2 size={16} />
@@ -124,7 +143,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                     {onSave && (
                         <button 
                             onClick={() => onSave(prof)}
-                            className={`p-2.5 rounded-xl border backdrop-blur-sm shadow-sm hover:shadow-md transition-all active:scale-90 ${isSaved ? 'bg-amber-500 text-white border-amber-400' : 'bg-white/90 text-gray-400 hover:text-amber-500 border-gray-100'}`}
+                            className={`p-2.5 rounded-xl border backdrop-blur-sm shadow-sm hover:shadow-md transition-all active:scale-95 ${isSaved ? 'bg-amber-500 text-white border-amber-400' : 'bg-white/60 text-gray-400 hover:text-amber-500 border-white/50'}`}
                             title={isSaved ? "已收藏" : "收藏到导师库"}
                         >
                             <Star size={16} fill={isSaved ? "currentColor" : "none"} />
@@ -136,7 +155,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
             {onLink && (
                 <button 
                     onClick={() => onLink(prof)}
-                    className={`p-2.5 rounded-xl border backdrop-blur-sm shadow-sm hover:shadow-md transition-all active:scale-90 ${isLinked ? 'bg-blue-600 text-white border-blue-500' : 'bg-white/90 text-gray-400 hover:text-blue-600 border-gray-100'}`}
+                    className={`p-2.5 rounded-xl border backdrop-blur-sm shadow-sm hover:shadow-md transition-all active:scale-95 ${isLinked ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-transparent shadow-blue-500/20' : 'bg-white/60 text-gray-400 hover:text-blue-600 border-white/50'}`}
                     title="推荐给学生"
                 >
                     <UserPlus size={16} />
@@ -146,7 +165,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
             {onUnlink && (
                  <button 
                     onClick={() => onUnlink((prof as FacultyRecord).id)}
-                    className="p-2.5 bg-white/90 backdrop-blur-sm text-gray-500 hover:text-red-600 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all active:scale-90"
+                    className="p-2.5 bg-white/60 backdrop-blur-sm text-gray-500 hover:text-red-600 rounded-xl border border-white/50 shadow-sm hover:shadow-md transition-all active:scale-95"
                     title="移除关联"
                 >
                     <Trash2 size={16} />
@@ -160,7 +179,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
             <div className="flex flex-col md:flex-row gap-8 w-full">
                 {/* Profile Photo */}
                 <div className="flex-shrink-0">
-                    {prof.photoUrl && !imgError ? (
+                    {prof.photoUrl && prof.photoUrl.trim() !== '' && !imgError ? (
                         <div className="w-24 h-24 rounded-3xl overflow-hidden shadow-xl shadow-gray-200/50 border-4 border-white bg-gray-50 relative group/photo transform -rotate-3 hover:rotate-0 transition-transform duration-500">
                             <img 
                                 src={prof.photoUrl} 
@@ -205,7 +224,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                             )}
                         </div>
                         <div className="flex items-center gap-4 flex-wrap mt-1">
-                            {prof.email && (
+                            {prof.email && prof.email.trim() !== '' && (
                                 <a 
                                     href={`mailto:${prof.email}`}
                                     className="text-xs text-gray-500 hover:text-blue-600 flex items-center gap-2 font-medium transition-colors"
@@ -214,7 +233,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                                     {prof.email}
                                 </a>
                             )}
-                            {prof.profileUrl && (
+                            {prof.profileUrl && prof.profileUrl.trim() !== '' && (
                                 <a 
                                     href={prof.profileUrl} 
                                     target="_blank" 
@@ -271,60 +290,56 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
         )}
 
         {/* Admission & Funding Data Section */}
-        <div className="mb-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {prof.qsRankingData && (
+        <div className="mb-10">
+          {!admissionLoaded ? (
+            <button onClick={handleLoadAdmission} disabled={loadingAdmission}
+              className="w-full py-3.5 bg-gray-50/80 hover:bg-blue-50 border border-dashed border-gray-200 rounded-2xl text-sm font-bold text-gray-400 hover:text-blue-600 transition-all flex items-center justify-center gap-2 group">
+              {loadingAdmission ? (
+                <><Loader2 size={14} className="animate-spin" /> 正在搜索招生数据...</>
+              ) : (
+                <><Search size={14} className="group-hover:scale-110 transition-transform" /> 点击加载招生数据（学费 / 奖学金 / DDL）</>
+              )}
+            </button>
+          ) : admissionData ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {admissionData.qsRanking && admissionData.qsRanking !== '未找到官方数据' && (
                 <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
-                    <div className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">QS World Ranking</div>
-                    <div className="text-sm font-bold text-gray-800">{prof.qsRankingData.value}</div>
-                    {prof.qsRankingData.sourceUrl && (
-                        <a href={prof.qsRankingData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">Source Link</a>
-                    )}
+                  <div className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">QS World Ranking</div>
+                  <div className="text-sm font-bold text-gray-800">{admissionData.qsRanking}</div>
                 </div>
-            )}
-            {prof.tuitionData && (
+              )}
+              {admissionData.tuition?.value && admissionData.tuition.value !== '未找到官方数据' && (
                 <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
-                    <div className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1">Tuition Fees</div>
-                    <div className="text-sm font-bold text-gray-800">{prof.tuitionData.value}</div>
-                    {prof.tuitionData.sourceUrl && (
-                        <a href={prof.tuitionData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">Source Link</a>
-                    )}
+                  <div className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1">学费</div>
+                  <div className="text-sm font-bold text-gray-800">{admissionData.tuition.value}</div>
+                  {admissionData.tuition.sourceUrl && <a href={admissionData.tuition.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
                 </div>
-            )}
-            {prof.scholarshipData && (
+              )}
+              {admissionData.deadline?.value && admissionData.deadline.value !== '未找到官方数据' && (
                 <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
-                    <div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">Scholarship / Funding</div>
-                    <div className="text-sm font-bold text-gray-800">{prof.scholarshipData.value}</div>
-                    {prof.scholarshipData.sourceUrl && (
-                        <a href={prof.scholarshipData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">Source Link</a>
-                    )}
+                  <div className="text-[9px] font-black text-red-600 uppercase tracking-widest mb-1">申请截止</div>
+                  <div className="text-sm font-bold text-gray-800">{admissionData.deadline.value}</div>
+                  {admissionData.deadline.sourceUrl && <a href={admissionData.deadline.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
                 </div>
-            )}
-            {prof.applicationReqsData && (
+              )}
+              {admissionData.requirements?.value && admissionData.requirements.value !== '未找到官方数据' && (
                 <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
-                    <div className="text-[9px] font-black text-indigo-600 uppercase tracking-widest mb-1">Application Requirements</div>
-                    <div className="text-sm font-bold text-gray-800">{prof.applicationReqsData.value}</div>
-                    {prof.applicationReqsData.sourceUrl && (
-                        <a href={prof.applicationReqsData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">Source Link</a>
-                    )}
+                  <div className="text-[9px] font-black text-indigo-600 uppercase tracking-widest mb-1">申请要求</div>
+                  <div className="text-sm font-bold text-gray-800">{admissionData.requirements.value}</div>
+                  {admissionData.requirements.sourceUrl && <a href={admissionData.requirements.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
                 </div>
-            )}
-            {prof.rpReqsData && (
+              )}
+              {admissionData.scholarships?.value && admissionData.scholarships.value !== '未找到官方数据' && (
                 <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
-                    <div className="text-[9px] font-black text-purple-600 uppercase tracking-widest mb-1">RP Requirements</div>
-                    <div className="text-sm font-bold text-gray-800">{prof.rpReqsData.value}</div>
-                    {prof.rpReqsData.sourceUrl && (
-                        <a href={prof.rpReqsData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">Source Link</a>
-                    )}
+                  <div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">奖学金</div>
+                  <div className="text-sm font-bold text-gray-800">{admissionData.scholarships.value}</div>
+                  {admissionData.scholarships.sourceUrl && <a href={admissionData.scholarships.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
                 </div>
-            )}
-            {prof.programUrl && (
-                <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
-                    <div className="text-[9px] font-black text-rose-600 uppercase tracking-widest mb-1">Program Admission Page</div>
-                    <a href={prof.programUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-bold text-blue-600 hover:underline block truncate">
-                        {prof.programUrl}
-                    </a>
-                </div>
-            )}
+              )}
+            </div>
+          ) : (
+            <div className="text-center text-sm text-gray-400 py-4 bg-gray-50 rounded-2xl">暂未查询到招生数据</div>
+          )}
         </div>
 
         {/* === AUDIT REPORT CARD === */}

@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { X, Upload, FileUp, Loader2, CheckCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { X, Upload, FileUp, Loader2, CheckCircle, Type, FileText, Sparkles, Image as ImageIcon } from 'lucide-react';
 import { parseClientFile } from '../services/geminiService';
 import { Client } from '../types';
 
@@ -15,7 +15,21 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
   const [isUploading, setIsUploading] = useState(false);
   const [parsedData, setParsedData] = useState<Partial<Client> | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'upload' | 'paste' | 'image'>('upload');
+  const [pastedText, setPastedText] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (selectedFile && selectedFile.type.startsWith('image/')) {
+      const url = URL.createObjectURL(selectedFile);
+      setPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setPreviewUrl(null);
+    }
+  }, [selectedFile]);
 
   if (!isOpen) return null;
 
@@ -27,11 +41,14 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
       setSmartArchive(false);
       setIsUploading(false);
       setUploadError(null);
+      setPastedText('');
+      setSelectedFile(null);
       onClose();
     }
   };
 
-  const processFile = async (file: File) => {
+  const handleParseFile = async () => {
+    if (!selectedFile) return;
     setIsUploading(true);
     setUploadError(null);
     try {
@@ -40,7 +57,7 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
         const result = e.target?.result as string;
         if (result) {
           try {
-            const data = await parseClientFile(result, file.type);
+            const data = await parseClientFile(result, selectedFile.type);
             setParsedData(data);
             if (data.name && !nickname) {
               setNickname(data.name);
@@ -57,7 +74,7 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
         setUploadError("读取文件失败");
         setIsUploading(false);
       };
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(selectedFile);
     } catch (e) {
       console.error(e);
       setUploadError("上传出错");
@@ -65,13 +82,33 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
     }
   };
 
+  const handleParseText = async () => {
+    if (!pastedText.trim()) return;
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const data = await parseClientFile(pastedText, 'text/plain');
+      setParsedData(data);
+      if (data.name && !nickname) {
+        setNickname(data.name);
+      }
+    } catch (err) {
+      console.error("Parsing failed", err);
+      setUploadError("解析失败，请重试");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    if (!smartArchive) return;
+    if (!smartArchive || (activeTab !== 'upload' && activeTab !== 'image')) return;
     
     const file = e.dataTransfer.files[0];
     if (file) {
-      processFile(file);
+      setSelectedFile(file);
+      setParsedData(null);
+      setUploadError(null);
     }
   };
 
@@ -79,7 +116,9 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
     if (!smartArchive) return;
     const file = e.target.files?.[0];
     if (file) {
-      processFile(file);
+      setSelectedFile(file);
+      setParsedData(null);
+      setUploadError(null);
     }
   };
 
@@ -87,18 +126,18 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       {/* Backdrop */}
       <div 
-        className="absolute inset-0 bg-black/20 backdrop-blur-md transition-opacity duration-500" 
+        className="absolute inset-0 bg-black/30 backdrop-blur-xl transition-opacity duration-500" 
         onClick={onClose}
       />
 
       {/* Modal Content */}
-      <div className="relative bg-white/90 backdrop-blur-2xl w-full max-w-lg rounded-[40px] shadow-2xl shadow-black/10 overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white">
+      <div className="relative glass w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
         {/* Header */}
-        <div className="flex items-center justify-between px-8 py-6 border-b border-gray-100/50">
-          <h3 className="text-xl font-black text-gray-900 tracking-tight">创建学生档案</h3>
+        <div className="flex items-center justify-between px-8 py-6 border-b border-white/40">
+          <h3 className="text-lg font-bold text-gray-900 tracking-tight">创建学生档案</h3>
           <button 
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100/50 rounded-full transition-all active:scale-90"
+            className="p-2 text-gray-400 hover:text-gray-900 hover:bg-white/50 rounded-full transition-all active:scale-90"
           >
             <X size={20} />
           </button>
@@ -108,14 +147,14 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
         <div className="p-8 space-y-8">
           {/* Nickname Input */}
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">档案名称 / 昵称</label>
+            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em] ml-1">档案名称 / 昵称</label>
             <div className="relative">
               <input 
                 type="text" 
                 placeholder="输入学生姓名或昵称"
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
-                className="w-full bg-gray-100/50 border-none rounded-2xl px-5 py-4 text-sm font-bold focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-gray-300 text-gray-900"
+                className="w-full bg-white/50 backdrop-blur-sm border border-gray-200/50 rounded-2xl px-5 py-4 text-sm font-bold focus:ring-2 focus:ring-blue-500/30 transition-all placeholder:text-gray-400 text-gray-900"
               />
             </div>
           </div>
@@ -124,111 +163,201 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
           <div className="space-y-4">
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                <span className="text-sm font-black text-gray-900 tracking-tight">AI 智能建档</span>
+                <div className="w-2 h-2 rounded-full bg-blue-500 shadow-sm shadow-blue-500/50"></div>
+                <span className="text-sm font-bold text-gray-900 tracking-tight">AI 智能建档</span>
               </div>
               <button 
                 onClick={() => setSmartArchive(!smartArchive)}
-                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-all focus:outline-none shadow-inner ${smartArchive ? 'bg-blue-500' : 'bg-gray-200'}`}
+                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-all focus:outline-none shadow-inner ${smartArchive ? 'bg-blue-500' : 'bg-gray-300'}`}
               >
                 <span 
                   className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${smartArchive ? 'translate-x-6' : 'translate-x-1'}`} 
                 />
               </button>
             </div>
-            
-            <div className="bg-blue-50/50 backdrop-blur-sm p-5 rounded-2xl border border-blue-100/50">
-              <p className="text-xs text-blue-800 leading-relaxed font-bold">
-                上传学生简历或信息表，AI 将自动识别并填充所有字段，为您节省手动输入时间。
-              </p>
-            </div>
           </div>
 
-          {/* Dropzone */}
-          <div className="group relative">
-            <input 
-              type="file" 
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-              className="hidden"
-              accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.webp"
-            />
-            <div 
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-              onClick={() => smartArchive && fileInputRef.current?.click()}
-              className={`
-                border-2 border-dashed rounded-[32px] p-10 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden
-                ${smartArchive ? 'border-blue-200 bg-blue-50/20' : 'border-gray-200 bg-gray-50/30 opacity-50 pointer-events-none'}
-                ${smartArchive && !isUploading && !parsedData ? 'hover:border-blue-400 hover:bg-blue-50/40' : ''}
-              `}
-            >
-              {isUploading ? (
-                <div className="flex flex-col items-center animate-pulse">
-                  <Loader2 size={40} className="text-blue-500 animate-spin mb-4" />
-                  <p className="text-sm font-black text-blue-600 uppercase tracking-widest">正在深度解析...</p>
-                </div>
-              ) : parsedData ? (
-                <div className="flex flex-col items-center animate-in zoom-in-95 duration-300">
-                  <div className="bg-emerald-500 text-white p-4 rounded-2xl shadow-lg shadow-emerald-100 mb-4">
-                    <CheckCircle size={32} />
+          {smartArchive && (
+            <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+              {/* Segmented Control */}
+              <div className="flex p-1 bg-gray-100/50 backdrop-blur-sm rounded-2xl border border-gray-200/50">
+                <button
+                  onClick={() => setActiveTab('upload')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-xl transition-all ${activeTab === 'upload' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <FileText size={14} /> 上传文件
+                </button>
+                <button
+                  onClick={() => setActiveTab('image')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-xl transition-all ${activeTab === 'image' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <ImageIcon size={14} /> 上传图片
+                </button>
+                <button
+                  onClick={() => setActiveTab('paste')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-xl transition-all ${activeTab === 'paste' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <Type size={14} /> 粘贴文本
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              {activeTab === 'upload' || activeTab === 'image' ? (
+                <div className="space-y-4">
+                  <div className="group relative">
+                    <input 
+                      type="file" 
+                      ref={fileInputRef}
+                      onChange={handleFileSelect}
+                      className="hidden"
+                      accept={activeTab === 'image' ? "image/*" : ".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.webp"}
+                    />
+                    <div 
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={handleDrop}
+                      onClick={() => fileInputRef.current?.click()}
+                      className={`
+                        border-2 border-dashed rounded-3xl p-8 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden
+                        ${selectedFile ? 'border-blue-400 bg-blue-50/40' : 'border-blue-200 bg-blue-50/20 hover:border-blue-400 hover:bg-blue-50/40'}
+                      `}
+                    >
+                      {selectedFile ? (
+                        <div className="flex flex-col items-center animate-in zoom-in-95 duration-300">
+                          {previewUrl ? (
+                            <div className="relative w-24 h-24 mb-3 rounded-2xl overflow-hidden shadow-sm border border-white/50">
+                              <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
+                            </div>
+                          ) : (
+                            <div className="p-4 rounded-2xl mb-3 transition-all shadow-sm bg-blue-500 text-white">
+                              <FileText size={32} />
+                            </div>
+                          )}
+                          <p className="text-sm font-bold text-gray-900 mb-1 tracking-tight truncate max-w-[200px]">{selectedFile.name}</p>
+                          <p className="text-xs text-gray-500 font-medium">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedFile(null);
+                              setParsedData(null);
+                            }}
+                            className="mt-4 text-[10px] font-bold text-gray-400 hover:text-red-500 uppercase tracking-widest underline underline-offset-4 transition-colors"
+                          >
+                            移除文件
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="p-4 rounded-2xl mb-4 transition-all shadow-sm bg-blue-100/50 text-blue-600 group-hover:scale-110">
+                            {activeTab === 'image' ? <ImageIcon size={32} /> : <FileUp size={32} />}
+                          </div>
+                          <p className="text-sm font-bold text-gray-900 mb-1 tracking-tight">
+                            {activeTab === 'image' ? '拖拽图片到这里' : '拖拽文档到这里'}
+                          </p>
+                          <p className="text-xs text-gray-500 mb-6 font-medium">或点击选择文件</p>
+                          <div className="flex flex-wrap justify-center gap-2 max-w-[240px]">
+                            {activeTab === 'image' ? (
+                              ['PNG', 'JPG', 'JPEG', 'WEBP'].map(ext => (
+                                <span key={ext} className="px-2 py-1 bg-white/50 rounded-md text-[9px] font-bold text-gray-500 border border-gray-200/50">{ext}</span>
+                              ))
+                            ) : (
+                              ['PDF', 'DOCX', 'TXT', 'IMG'].map(ext => (
+                                <span key={ext} className="px-2 py-1 bg-white/50 rounded-md text-[9px] font-bold text-gray-500 border border-gray-200/50">{ext}</span>
+                              ))
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-sm font-black text-emerald-700">解析成功！</p>
-                  <p className="text-xs text-emerald-600 mt-1 font-bold">已自动提取关键信息</p>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setParsedData(null);
-                      setNickname('');
-                    }}
-                    className="mt-6 text-[10px] font-black text-gray-400 hover:text-gray-900 uppercase tracking-widest underline underline-offset-4"
-                  >
-                    重新上传
-                  </button>
+                  
+                  {selectedFile && !parsedData && (
+                    <button
+                      onClick={handleParseFile}
+                      disabled={isUploading}
+                      className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl text-sm font-bold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md shadow-blue-500/20 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {isUploading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                      {isUploading ? '解析中...' : 'AI 一键解析'}
+                    </button>
+                  )}
+                  
+                  {uploadError && (
+                    <p className="text-xs text-red-500 text-center font-bold">{uploadError}</p>
+                  )}
                 </div>
               ) : (
-                <>
-                  <div className={`p-4 rounded-2xl mb-4 transition-all shadow-sm ${smartArchive ? 'bg-blue-100 text-blue-600 group-hover:scale-110' : 'bg-gray-100 text-gray-400'}`}>
-                    <FileUp size={32} />
-                  </div>
-                  <p className="text-sm font-black text-gray-900 mb-1 tracking-tight">拖拽文档到这里</p>
-                  <p className="text-xs text-gray-400 mb-6 font-bold">或点击选择文件</p>
-                  <div className="flex flex-wrap justify-center gap-2 max-w-[240px]">
-                    {['PDF', 'DOCX', 'TXT', 'IMG'].map(ext => (
-                      <span key={ext} className="px-2 py-1 bg-white/50 rounded-md text-[9px] font-black text-gray-400 border border-gray-100">{ext}</span>
-                    ))}
-                  </div>
+                <div className="space-y-4">
+                  <textarea
+                    value={pastedText}
+                    onChange={(e) => setPastedText(e.target.value)}
+                    placeholder="在此粘贴学生的简历、背景信息或需求描述..."
+                    className="w-full bg-white/50 backdrop-blur-sm border border-gray-200/50 rounded-2xl p-4 text-sm font-medium focus:ring-2 focus:ring-blue-500/30 transition-all placeholder:text-gray-400 text-gray-900 resize-none h-32 custom-scrollbar"
+                  />
+                  <button
+                    onClick={handleParseText}
+                    disabled={isUploading || !pastedText.trim()}
+                    className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl text-sm font-bold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md shadow-blue-500/20 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {isUploading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                    {isUploading ? '解析中...' : 'AI 一键解析'}
+                  </button>
                   {uploadError && (
-                    <p className="text-xs text-red-500 mt-4 font-black bg-red-50 px-4 py-2 rounded-full border border-red-100">{uploadError}</p>
+                    <p className="text-xs text-red-500 text-center font-bold">{uploadError}</p>
                   )}
-                </>
+                </div>
+              )}
+
+              {/* Preview Card */}
+              {parsedData && (
+                <div className="glass p-5 rounded-2xl border border-white/50 shadow-sm animate-in slide-in-from-bottom-2">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50"></div>
+                      解析预览
+                    </h4>
+                    <div className="bg-emerald-50 text-emerald-600 px-2 py-1 rounded-md text-[10px] font-bold border border-emerald-100 flex items-center gap-1">
+                      <CheckCircle size={10} /> 解析成功
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-white/40 p-3 rounded-xl border border-white/50">
+                      <span className="text-[10px] text-gray-500 block mb-1 font-bold uppercase tracking-wider">姓名</span>
+                      <span className="text-sm font-bold text-gray-900">{parsedData.name || '-'}</span>
+                    </div>
+                    <div className="bg-white/40 p-3 rounded-xl border border-white/50">
+                      <span className="text-[10px] text-gray-500 block mb-1 font-bold uppercase tracking-wider">GPA</span>
+                      <span className="text-sm font-bold text-gray-900">{parsedData.gpa || '-'}</span>
+                    </div>
+                    <div className="bg-white/40 p-3 rounded-xl border border-white/50">
+                      <span className="text-[10px] text-gray-500 block mb-1 font-bold uppercase tracking-wider">目标国家</span>
+                      <span className="text-sm font-bold text-gray-900 truncate block">{parsedData.targetCountries || '-'}</span>
+                    </div>
+                    <div className="bg-white/40 p-3 rounded-xl border border-white/50">
+                      <span className="text-[10px] text-gray-500 block mb-1 font-bold uppercase tracking-wider">入学年份</span>
+                      <span className="text-sm font-bold text-gray-900">{parsedData.entryYear || '-'}</span>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
-            {!smartArchive && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <span className="bg-white/90 backdrop-blur-md px-4 py-2 rounded-full text-[10px] font-black text-gray-400 border border-gray-100 shadow-xl">
-                  开启智能建档以解锁上传功能
-                </span>
-              </div>
-            )}
-          </div>
+          )}
         </div>
 
         {/* Footer */}
-        <div className="px-8 py-6 bg-gray-50/50 backdrop-blur-md flex justify-end gap-3 border-t border-gray-100/50">
+        <div className="px-8 py-6 bg-white/40 backdrop-blur-md flex justify-end gap-3 border-t border-white/40">
           <button 
             onClick={onClose}
-            className="px-6 py-3 rounded-2xl text-sm font-black text-gray-500 hover:bg-gray-100 transition-all active:scale-95"
+            className="px-6 py-3 rounded-2xl text-sm font-bold text-gray-600 hover:bg-white/60 transition-all active:scale-95"
           >
             取消
           </button>
           <button 
             onClick={handleConfirm}
             disabled={isUploading || !nickname.trim()}
-            className={`px-8 py-3 rounded-2xl text-sm font-black transition-all shadow-xl active:scale-95
+            className={`px-8 py-3 rounded-2xl text-sm font-bold transition-all shadow-md active:scale-95
               ${isUploading || !nickname.trim() 
-                ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none' 
-                : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-blue-200'}
+                ? 'bg-gray-200/50 text-gray-400 cursor-not-allowed shadow-none' 
+                : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-blue-500/20 hover:shadow-lg'}
             `}
           >
             {isUploading ? '处理中...' : '确认并创建'}

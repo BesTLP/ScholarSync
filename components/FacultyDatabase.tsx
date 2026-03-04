@@ -162,15 +162,15 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
   };
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <div className="flex h-screen bg-transparent overflow-hidden">
       {/* Left Sidebar: Statistics & Quick Filters */}
-      <div className="w-64 bg-white border-r border-gray-200 flex-shrink-0 flex flex-col overflow-y-auto custom-scrollbar">
-        <div className="p-6 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+      <div className="w-64 glass border-r border-white/50 flex-shrink-0 flex flex-col overflow-y-auto custom-scrollbar">
+        <div className="p-6 border-b border-white/50">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2 tracking-tight">
             <Database size={20} className="text-blue-600" />
             导师库概览
           </h2>
-          <p className="text-xs text-gray-500 mt-1">共收录 {facultyDatabase.length} 位导师</p>
+          <p className="text-xs text-gray-500 mt-1 font-medium">共收录 {facultyDatabase.length} 位导师</p>
         </div>
 
         <div className="p-4 space-y-6">
@@ -180,10 +180,10 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
             <div className="space-y-1">
               <button 
                 onClick={() => setSelectedCountry('all')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${selectedCountry === 'all' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedCountry === 'all' ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
               >
                 <span>全部</span>
-                <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-xs">{facultyDatabase.length}</span>
+                <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{facultyDatabase.length}</span>
               </button>
               {countries.map(country => {
                 const count = facultyDatabase.filter(f => f.country === country).length;
@@ -191,10 +191,10 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <button 
                     key={country}
                     onClick={() => setSelectedCountry(country)}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${selectedCountry === country ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedCountry === country ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
                   >
                     <span>{country}</span>
-                    <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-xs">{count}</span>
+                    <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{count}</span>
                   </button>
                 );
               })}
@@ -207,10 +207,10 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
             <div className="space-y-1">
               <button 
                 onClick={() => setSelectedField('all')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${selectedField === 'all' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedField === 'all' ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
               >
                 <span>全部</span>
-                <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-xs">{facultyDatabase.length}</span>
+                <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{facultyDatabase.length}</span>
               </button>
               {fields.map(field => {
                 const count = facultyDatabase.filter(f => f.fieldCategory === field).length;
@@ -218,10 +218,10 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <button 
                     key={field}
                     onClick={() => setSelectedField(field)}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${selectedField === field ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedField === field ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
                   >
                     <span>{field}</span>
-                    <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-xs">{count}</span>
+                    <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{count}</span>
                   </button>
                 );
               })}
@@ -233,7 +233,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toolbar */}
-        <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-col gap-4 shadow-sm z-10">
+        <div className="glass border-b border-white/50 px-6 py-4 flex flex-col gap-4 shadow-sm z-10">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4 flex-1">
               <div className="relative w-96">
@@ -243,7 +243,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   placeholder="搜索导师姓名、院校、研究方向..." 
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                  className="w-full pl-10 pr-4 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all shadow-sm"
                 />
               </div>
               
@@ -252,7 +252,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                 <select 
                   value={selectedUniversity} 
                   onChange={(e) => setSelectedUniversity(e.target.value)}
-                  className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm"
                 >
                   <option value="all">所有院校</option>
                   {universities.map(u => <option key={u} value={u}>{u}</option>)}
@@ -263,14 +263,14 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => setIsManualEntryModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm font-medium"
+                className="flex items-center gap-2 px-4 py-2 bg-white/60 backdrop-blur-sm border border-white/50 text-gray-700 rounded-xl hover:bg-white/80 transition-all shadow-sm font-bold active:scale-95"
               >
                 <Plus size={16} />
                 手动录入
               </button>
               <button 
                 onClick={() => setIsSearchModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md font-medium"
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md shadow-blue-500/20 font-bold active:scale-95"
               >
                 <Globe size={16} />
                 联网搜索导入
@@ -279,24 +279,24 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
           </div>
 
           <div className="flex items-center justify-between pt-2">
-            <div className="flex items-center gap-4 text-sm text-gray-500">
-              <span className="font-medium text-gray-900">
+            <div className="flex items-center gap-4 text-sm text-gray-500 font-medium">
+              <span className="font-bold text-gray-900">
                 {filteredFaculty.length}
               </span> 
               个结果
               {selectedIds.size > 0 && (
-                <div className="flex items-center gap-3 ml-4 pl-4 border-l border-gray-200">
-                  <span className="text-blue-600 font-medium">已选 {selectedIds.size} 项</span>
+                <div className="flex items-center gap-3 ml-4 pl-4 border-l border-gray-300/50">
+                  <span className="text-blue-600 font-bold">已选 {selectedIds.size} 项</span>
                   <button 
                     onClick={handleBatchDelete}
-                    className="flex items-center gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+                    className="flex items-center gap-1 text-red-600 hover:text-red-700 hover:bg-red-50/50 px-2 py-1 rounded-lg transition-colors font-bold"
                   >
                     <Trash2 size={14} />
                     批量删除
                   </button>
                   <button 
                     onClick={handleExportCSV}
-                    className="flex items-center gap-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 px-2 py-1 rounded transition-colors"
+                    className="flex items-center gap-1 text-gray-600 hover:text-gray-900 hover:bg-white/60 px-2 py-1 rounded-lg transition-colors font-bold"
                   >
                     <Download size={14} />
                     导出 CSV
@@ -305,16 +305,16 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
               )}
             </div>
 
-            <div className="flex items-center bg-gray-100 p-1 rounded-lg">
+            <div className="flex items-center bg-white/40 backdrop-blur-sm p-1 rounded-xl shadow-sm border border-white/50">
               <button 
                 onClick={() => setViewMode('grid')}
-                className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`p-1.5 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 <LayoutGrid size={18} />
               </button>
               <button 
                 onClick={() => setViewMode('list')}
-                className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`p-1.5 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 <ListIcon size={18} />
               </button>
@@ -367,16 +367,16 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   ))}
                 </div>
               ) : (
-                <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+                <div className="glass border border-white/50 rounded-2xl shadow-sm overflow-hidden">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200 text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      <tr className="bg-white/40 border-b border-white/50 text-xs font-bold text-gray-500 uppercase tracking-wider backdrop-blur-sm">
                         <th className="p-4 w-12 text-center">
                           <input 
                             type="checkbox" 
                             checked={selectedIds.size === filteredFaculty.length && filteredFaculty.length > 0}
                             onChange={toggleAllSelection}
-                            className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                            className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shadow-sm"
                           />
                         </th>
                         <th className="p-4">导师姓名</th>
@@ -387,20 +387,20 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                         <th className="p-4 text-right">操作</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-white/30">
                       {filteredFaculty.map(faculty => (
-                        <tr key={faculty.id} className={`hover:bg-blue-50/50 transition-colors ${selectedIds.has(faculty.id) ? 'bg-blue-50/30' : ''}`}>
+                        <tr key={faculty.id} className={`hover:bg-white/60 transition-colors ${selectedIds.has(faculty.id) ? 'bg-blue-50/50' : ''}`}>
                           <td className="p-4 text-center">
                             <input 
                               type="checkbox" 
                               checked={selectedIds.has(faculty.id)}
                               onChange={() => toggleSelection(faculty.id)}
-                              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shadow-sm"
                             />
                           </td>
                           <td className="p-4">
                             <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-sm overflow-hidden">
+                              <div className="w-10 h-10 rounded-full bg-white/60 backdrop-blur-sm flex items-center justify-center text-gray-500 font-bold text-sm overflow-hidden shadow-sm">
                                 {faculty.photoUrl ? (
                                   <img src={faculty.photoUrl} alt={faculty.name} className="w-full h-full object-cover" />
                                 ) : (
@@ -408,34 +408,34 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                                 )}
                               </div>
                               <div>
-                                <div className="font-bold text-gray-900">{faculty.name}</div>
-                                <div className="text-xs text-gray-500">{faculty.country}</div>
+                                <div className="font-bold text-gray-900 tracking-tight">{faculty.name}</div>
+                                <div className="text-xs text-gray-500 font-medium">{faculty.country}</div>
                               </div>
                             </div>
                           </td>
                           <td className="p-4">
-                            <div className="font-medium text-gray-900">{faculty.university}</div>
-                            <div className="text-xs text-gray-500">{faculty.title}</div>
+                            <div className="font-bold text-gray-900">{faculty.university}</div>
+                            <div className="text-xs text-gray-500 font-medium">{faculty.title}</div>
                           </td>
                           <td className="p-4">
                             <div className="flex flex-wrap gap-1 max-w-xs">
                               {faculty.researchAreas.slice(0, 2).map((area, i) => (
-                                <span key={i} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs truncate max-w-[100px]">
+                                <span key={i} className="px-2 py-0.5 bg-white/60 backdrop-blur-sm text-gray-600 rounded-md text-xs truncate max-w-[100px] shadow-sm border border-white/50 font-medium">
                                   {area}
                                 </span>
                               ))}
                               {faculty.researchAreas.length > 2 && (
-                                <span className="px-2 py-0.5 bg-gray-50 text-gray-400 rounded text-xs">
+                                <span className="px-2 py-0.5 bg-white/40 text-gray-500 rounded-md text-xs border border-white/30 font-medium">
                                   +{faculty.researchAreas.length - 2}
                                 </span>
                               )}
                             </div>
                           </td>
                           <td className="p-4">
-                            <span className={`px-2 py-1 rounded text-xs font-bold ${
-                              faculty.matchScore >= 90 ? 'bg-emerald-100 text-emerald-700' :
-                              faculty.matchScore >= 80 ? 'bg-blue-100 text-blue-700' :
-                              'bg-amber-100 text-amber-700'
+                            <span className={`px-2 py-1 rounded-md text-xs font-bold shadow-sm ${
+                              faculty.matchScore >= 90 ? 'bg-emerald-50/80 text-emerald-700 border border-emerald-100/50' :
+                              faculty.matchScore >= 80 ? 'bg-blue-50/80 text-blue-700 border border-blue-100/50' :
+                              'bg-amber-50/80 text-amber-700 border border-amber-100/50'
                             }`}>
                               {faculty.matchScore}%
                             </span>
@@ -446,33 +446,33 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                                 {faculty.linkedClientIds.slice(0, 3).map(cid => {
                                   const client = clients.find(c => c.id === cid);
                                   return (
-                                    <div key={cid} className="w-8 h-8 rounded-full bg-white border-2 border-white shadow-sm flex items-center justify-center text-xs font-bold text-gray-600 bg-gray-100" title={client?.name}>
+                                    <div key={cid} className="w-8 h-8 rounded-full bg-white/80 backdrop-blur-sm border-2 border-white shadow-sm flex items-center justify-center text-xs font-bold text-gray-600" title={client?.name}>
                                       {client?.name.charAt(0)}
                                     </div>
                                   );
                                 })}
                                 {faculty.linkedClientIds.length > 3 && (
-                                  <div className="w-8 h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center text-xs font-bold text-gray-500">
+                                  <div className="w-8 h-8 rounded-full bg-white/60 backdrop-blur-sm border-2 border-white flex items-center justify-center text-xs font-bold text-gray-500 shadow-sm">
                                     +{faculty.linkedClientIds.length - 3}
                                   </div>
                                 )}
                               </div>
                             ) : (
-                              <span className="text-gray-400 text-xs">-</span>
+                              <span className="text-gray-400 text-xs font-medium">-</span>
                             )}
                           </td>
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-2">
                               <button 
                                 onClick={() => setLinkingFacultyId(faculty.id)}
-                                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-white/60 rounded-lg transition-all active:scale-95"
                                 title="关联学生"
                               >
                                 <UserPlus size={16} />
                               </button>
                               <button 
                                 onClick={() => onDeleteFaculty(faculty.id)}
-                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-white/60 rounded-lg transition-all active:scale-95"
                                 title="删除"
                               >
                                 <Trash2 size={16} />
@@ -507,17 +507,17 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
 
       {/* Client Selection Modal for Linking */}
       {linkingFacultyId && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-              <h3 className="text-lg font-bold text-gray-900">选择要关联的学生</h3>
-              <button onClick={() => setLinkingFacultyId(null)} className="text-gray-400 hover:text-gray-600">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-xl flex items-center justify-center z-[60] p-4">
+          <div className="glass rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200 border border-white/50">
+            <div className="p-6 border-b border-white/50 bg-white/40 backdrop-blur-sm flex justify-between items-center">
+              <h3 className="text-lg font-bold text-gray-900 tracking-tight">选择要关联的学生</h3>
+              <button onClick={() => setLinkingFacultyId(null)} className="text-gray-400 hover:text-gray-600 hover:bg-white/60 p-2 rounded-xl transition-all active:scale-95">
                 <X size={20} />
               </button>
             </div>
-            <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+            <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar bg-white/20 backdrop-blur-sm">
               {clients.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">暂无学生档案</p>
+                <p className="text-center text-gray-500 py-8 font-medium">暂无学生档案</p>
               ) : (
                 clients.map(client => {
                   const isLinked = facultyDatabase.find(f => f.id === linkingFacultyId)?.linkedClientIds?.includes(client.id);
@@ -532,20 +532,20 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                         }
                         setLinkingFacultyId(null);
                       }}
-                      className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${
+                      className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-95 ${
                         isLinked 
-                          ? 'border-blue-200 bg-blue-50 text-blue-700' 
-                          : 'border-gray-100 bg-gray-50 hover:border-blue-200 hover:bg-blue-50/50 text-gray-700'
+                          ? 'border-blue-300 bg-blue-50/80 text-blue-700 shadow-sm' 
+                          : 'border-white/50 bg-white/60 hover:border-blue-300 hover:bg-blue-50/50 text-gray-700 shadow-sm'
                       }`}
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center font-bold text-xs">
+                        <div className="w-8 h-8 rounded-full bg-white/80 backdrop-blur-sm border border-white/50 flex items-center justify-center font-bold text-xs shadow-sm">
                           {client.name.charAt(0)}
                         </div>
-                        <span className="font-medium">{client.name}</span>
+                        <span className="font-bold">{client.name}</span>
                       </div>
                       {isLinked ? (
-                        <span className="text-xs font-bold bg-blue-100 px-2 py-1 rounded text-blue-600">已关联</span>
+                        <span className="text-xs font-bold bg-blue-100/80 px-2 py-1 rounded-md text-blue-700 border border-blue-200/50 shadow-sm">已关联</span>
                       ) : (
                         <Plus size={16} className="text-gray-400" />
                       )}
@@ -554,10 +554,10 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                 })
               )}
             </div>
-            <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+            <div className="p-4 bg-white/40 backdrop-blur-sm border-t border-white/50 flex justify-end">
               <button
                 onClick={() => setLinkingFacultyId(null)}
-                className="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800"
+                className="px-6 py-2.5 text-sm font-bold text-gray-600 hover:bg-white/60 rounded-xl transition-all active:scale-95"
               >
                 取消
               </button>
@@ -568,15 +568,15 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
 
       {/* Edit Faculty Modal */}
       {editingFaculty && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-              <h3 className="text-lg font-bold text-gray-900">编辑导师信息</h3>
-              <button onClick={() => setEditingFaculty(null)} className="text-gray-400 hover:text-gray-600">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-xl flex items-center justify-center z-[70] p-4">
+          <div className="glass rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200 border border-white/50">
+            <div className="p-6 border-b border-white/50 flex justify-between items-center bg-white/40 backdrop-blur-sm">
+              <h3 className="text-lg font-bold text-gray-900 tracking-tight">编辑导师信息</h3>
+              <button onClick={() => setEditingFaculty(null)} className="text-gray-400 hover:text-gray-600 hover:bg-white/60 p-2 rounded-xl transition-all active:scale-95">
                 <X size={20} />
               </button>
             </div>
-            <div className="p-8 space-y-6 max-h-[75vh] overflow-y-auto custom-scrollbar">
+            <div className="p-8 space-y-6 max-h-[75vh] overflow-y-auto custom-scrollbar bg-white/20 backdrop-blur-sm">
               <div className="grid grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">姓名</label>
@@ -584,7 +584,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                     type="text" 
                     defaultValue={editingFaculty.name}
                     id="edit-name"
-                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
                 <div className="space-y-2">
@@ -593,7 +593,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                     type="text" 
                     defaultValue={editingFaculty.title}
                     id="edit-title"
-                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
                 <div className="space-y-2">
@@ -602,7 +602,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                     type="text" 
                     defaultValue={editingFaculty.university}
                     id="edit-university"
-                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
                 <div className="space-y-2">
@@ -611,7 +611,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                     type="text" 
                     defaultValue={editingFaculty.department}
                     id="edit-department"
-                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
                 <div className="space-y-2">
@@ -620,7 +620,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                     type="email" 
                     defaultValue={editingFaculty.email}
                     id="edit-email"
-                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
                 <div className="space-y-2">
@@ -629,7 +629,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                     type="text" 
                     defaultValue={editingFaculty.country}
                     id="edit-country"
-                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
                 <div className="space-y-2">
@@ -638,7 +638,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                     type="text" 
                     defaultValue={editingFaculty.fieldCategory}
                     id="edit-field"
-                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
               </div>
@@ -648,7 +648,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   type="text" 
                   defaultValue={editingFaculty.researchAreas.join(', ')}
                   id="edit-research"
-                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                  className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                 />
               </div>
               <div className="space-y-2">
@@ -657,14 +657,14 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   defaultValue={editingFaculty.notes}
                   id="edit-notes"
                   rows={3}
-                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-none resize-none"
+                  className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none resize-none transition-all shadow-sm font-medium"
                 />
               </div>
             </div>
-            <div className="p-6 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+            <div className="p-6 bg-white/40 backdrop-blur-sm border-t border-white/50 flex justify-end gap-3">
               <button
                 onClick={() => setEditingFaculty(null)}
-                className="px-6 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-800"
+                className="px-6 py-2.5 text-sm font-bold text-gray-600 hover:bg-white/60 rounded-xl transition-all active:scale-95"
               >
                 取消
               </button>
@@ -684,7 +684,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   onUpdateFaculty(editingFaculty.id, updates);
                   setEditingFaculty(null);
                 }}
-                className="px-8 py-2.5 bg-cyan-500 text-white rounded-xl text-sm font-bold hover:bg-cyan-600 shadow-md transition-all"
+                className="px-8 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-sm font-bold hover:from-blue-700 hover:to-indigo-700 shadow-md shadow-blue-500/20 transition-all active:scale-95"
               >
                 保存修改
               </button>

@@ -51,7 +51,10 @@ export const parseRequirementText = async (rawText: string): Promise<ParsedRequi
     1. **profileSummary**: Combine the student's background (Degree, School, GPA), Research Interests, and Major.
     2. **targets**: Extract a LIST of target regions/universities and the specific NUMBER (quota) of professors required for each.
        - If the text says "US 5 people, Australia 5 people", create two entries.
-    3. **department**: Extract the target major/department.
+    3. **department**: Extract ALL target research areas/majors. 
+       - If the student has MULTIPLE research interests (e.g., "piano AND cello", "ML and bioinformatics"), 
+         combine them with "、" separator (e.g., "钢琴、大提琴" or "机器学习、生物信息学").
+       - Do NOT pick only one; preserve ALL keywords.
     4. **targetPosition**: Extract explicit rank requirements.
        - If text says "Professor only" or "正教授", extract "Full Professor".
        - If text says "Associate accepted" or "副教授", extract "Associate Professor+".
@@ -121,6 +124,195 @@ export const parseRequirementText = async (rawText: string): Promise<ParsedRequi
   }
 };
 
+export interface DimensionResult {
+  dimension: string;
+  description: string;
+  faculty: FacultyMember[];
+}
+
+export interface DecomposedSearchResult {
+  isNiche: boolean;
+  reasoning: string;
+  dimensions: DimensionResult[];
+  allFaculty: FacultyMember[];  // 去重汇总，带 dimensionTags
+}
+
+interface DecomposedField {
+  dimension: string;      // 学科维度名，如 "材料科学与保护"
+  keywords: string[];     // 搜索关键词，如 ["paper conservation chemistry", "古籍纸张修复"]
+  description: string;    // 为什么这个维度与原始需求相关
+}
+
+interface FieldDecomposition {
+  isNiche: boolean;           // 是否判定为稀缺/冷门方向
+  originalField: string;      // 原始输入
+  dimensions: DecomposedField[];  // 拆解后的维度（3-6个）
+  reasoning: string;          // 为什么这样拆解
+}
+
+export const decomposeResearchField = async (
+  department: string, 
+  studentProfile?: string
+): Promise<FieldDecomposition> => {
+  const ai = getClient();
+  
+  const prompt = `
+    Task: Analyze whether this research direction is a "niche/rare interdisciplinary field" that is unlikely to have a single professor perfectly matching it.
+    
+    Research Direction: "${department}"
+    Student Background: "${studentProfile || 'Not provided'}"
+    
+    **Step 1: Niche Detection**
+    Determine if this field is:
+    - A well-established discipline with many professors (e.g., "Computer Science", "Economics") → isNiche = false
+    - A rare/highly interdisciplinary field where no single professor likely covers everything (e.g., "古籍修复", "Music Therapy for Alzheimer's", "Space Law", "Computational Archaeology") → isNiche = true
+    
+    **Step 2: If isNiche = true, decompose into academic dimensions**
+    Break the field into 3-6 concrete academic disciplines/sub-fields that collectively cover the student's research interest. For each dimension:
+    - dimension: A recognized academic discipline name (Chinese + English)
+    - keywords: 2-3 search keywords that would find professors in this dimension who have SOME connection to the original topic
+    - description: Why this dimension is relevant (1 sentence, Chinese)
+    
+    Example for "古籍修复":
+    [
+      { "dimension": "材料科学与保护 (Conservation Science)", "keywords": ["paper conservation chemistry professor", "文物保护材料科学"], "description": "古籍的纸张、墨水、装帧材料的科学分析与保护技术" },
+      { "dimension": "文献学与版本学 (Textual Studies)", "keywords": ["classical Chinese bibliography professor", "古典文献学教授"], "description": "古籍的文字内容鉴定、版本源流考证" },
+      { "dimension": "艺术品修复 (Art Conservation)", "keywords": ["book restoration conservation professor", "书画修复教授"], "description": "修复技法、修复伦理、实操训练" },
+      { "dimension": "数字人文 (Digital Humanities)", "keywords": ["digital heritage preservation professor", "数字化古籍"], "description": "古籍数字化扫描、AI辅助文字识别与修复" }
+    ]
+    
+    **Step 3: If isNiche = false**
+    Return dimensions as a single entry with the original field name.
+    
+    Output Language: Chinese for descriptions, English+Chinese for dimension names.
+  `;
+
+  const schema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      isNiche: { type: Type.BOOLEAN },
+      originalField: { type: Type.STRING },
+      reasoning: { type: Type.STRING, description: "Why this is/isn't considered niche (Chinese)" },
+      dimensions: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            dimension: { type: Type.STRING },
+            keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+            description: { type: Type.STRING }
+          },
+          required: ["dimension", "keywords", "description"]
+        }
+      }
+    },
+    required: ["isNiche", "originalField", "reasoning", "dimensions"]
+  };
+
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL_FAST,
+      contents: prompt,
+      config: { responseMimeType: "application/json", responseSchema: schema }
+    });
+    return JSON.parse(response.text || '{}') as FieldDecomposition;
+  } catch {
+    return {
+      isNiche: false,
+      originalField: department,
+      reasoning: '分析失败，使用原始方向搜索',
+      dimensions: [{ dimension: department, keywords: [department], description: department }]
+    };
+  }
+};
+
+export const generateFacultyMatchesDecomposed = async (
+  params: MatchParams
+): Promise<DecomposedSearchResult> => {
+  const { department, studentProfile } = params;
+  
+  // Step 1: 判断是否需要拆解
+  const decomposition = await decomposeResearchField(department || '', studentProfile);
+  
+  // Step 2: 如果不是冷门方向，走原有逻辑
+  if (!decomposition.isNiche) {
+    const results = await generateFacultyMatches(params);
+    return {
+      isNiche: false,
+      reasoning: decomposition.reasoning,
+      dimensions: [{ dimension: department || '', description: '', faculty: results }],
+      allFaculty: results
+    };
+  }
+  
+  // Step 3: 冷门方向——分维度搜索
+  // 按维度分配配额：总配额均分给每个维度
+  const totalCount = params.targets.reduce((sum, t) => sum + (t.count || 5), 0) || 10;
+  const countPerDimension = Math.max(2, Math.floor(totalCount / decomposition.dimensions.length));
+  
+  const dimensionResults: DimensionResult[] = [];
+  
+  for (const dim of decomposition.dimensions) {
+    try {
+      // 为每个维度构造搜索参数
+      const dimParams: MatchParams = {
+        ...params,
+        department: dim.dimension,
+        studentProfile: `${studentProfile || ''}\n\n[Context: This search focuses on the "${dim.dimension}" aspect of "${decomposition.originalField}". ${dim.description}]`,
+        targets: params.targets.map(t => ({ ...t, count: countPerDimension }))
+      };
+      
+      const results = await generateFacultyMatches(dimParams);
+      dimensionResults.push({
+        dimension: dim.dimension,
+        description: dim.description,
+        faculty: results
+      });
+    } catch (e) {
+      console.error(`Dimension search failed for ${dim.dimension}:`, e);
+      dimensionResults.push({ dimension: dim.dimension, description: dim.description, faculty: [] });
+    }
+  }
+  
+  // Step 4: 去重汇总（同名同校视为同一人）
+  const seen = new Map<string, FacultyMember & { dimensionTags: string[] }>();
+  
+  for (const dr of dimensionResults) {
+    for (const prof of dr.faculty) {
+      const key = `${prof.name}||${prof.university}`;
+      if (seen.has(key)) {
+        // 同一人在多个维度出现——加分！说明是交叉型学者
+        const existing = seen.get(key)!;
+        existing.dimensionTags.push(dr.dimension);
+        existing.matchScore = Math.min(100, existing.matchScore + 10); // 每多覆盖一个维度加10分
+      } else {
+        seen.set(key, { 
+          ...prof, 
+          dimensionTags: [dr.dimension],
+          // 在 alignmentDetails 中注明来源维度
+          alignmentDetails: `[${dr.dimension}] ${prof.alignmentDetails || ''}`
+        });
+      }
+    }
+  }
+  
+  // 按 matchScore 降序 + dimensionTags 数量降序排序
+  const allFaculty = Array.from(seen.values())
+    .sort((a, b) => {
+      if (b.dimensionTags.length !== a.dimensionTags.length) {
+        return b.dimensionTags.length - a.dimensionTags.length; // 覆盖维度多的排前面
+      }
+      return b.matchScore - a.matchScore;
+    });
+
+  return {
+    isNiche: true,
+    reasoning: decomposition.reasoning,
+    dimensions: dimensionResults,
+    allFaculty
+  };
+};
+
 export const generateFacultyMatches = async (params: MatchParams): Promise<FacultyMember[]> => {
   const ai = getClient();
   const { 
@@ -135,6 +327,9 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
     exclusions
   } = params;
   
+  const currentYear = new Date().getFullYear();
+  const nextYear = currentYear + 1;
+
   const hasProfile = studentProfile && studentProfile.trim().length > 0;
   
   // Construct detailed target context
@@ -159,15 +354,25 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
   if (totalCount > 20) totalCount = 20;
   if (totalCount < 1) totalCount = 10;
 
+  // 解析交叉学科关键词：支持中英文逗号、顿号、加号、"和"、"与"、"AND"分隔
+  const departmentKeywords = (department || '')
+    .split(/[,，、+&\s]+|(?:和|与|AND)/gi)
+    .map(k => k.trim())
+    .filter(k => k.length > 0);
+
+  const isInterdisciplinary = departmentKeywords.length > 1;
+
   let promptContent = `
     Role: You are a rigorous Academic Admissions Auditor. Your goal is to find high-quality faculty matches with VERIFIED admissions data.
     
     **CURRENT DATE CONTEXT**: Today is ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}.
-    **DEADLINE REQUIREMENT**: You MUST look for future deadlines (Spring 2027 or Fall 2027). Do NOT return past dates from 2024/2025 unless no other info is available.
+    **DEADLINE REQUIREMENT**: You MUST look for future deadlines (Spring ${nextYear} or Fall ${nextYear}). Do NOT return past dates from 2024/2025 unless no other info is available.
 
     User Inputs:
     - Student Profile: "${hasProfile ? studentProfile : "Not provided"}"
     - Department Focus: "${department || "General"}"
+    - Research Keywords (CRITICAL): [${departmentKeywords.map(k => `"${k}"`).join(', ')}]
+    - Interdisciplinary Mode: ${isInterdisciplinary ? 'YES' : 'NO'}
     - Target Position Requirement: "${targetPosition || "Full Professor"}" (See Rank Logic)
     - Entry Year: "${entryYear || "N/A"}" (Search for this intake)
     - Scholarship Need: "${scholarship || "N/A"}"
@@ -178,6 +383,31 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
     **QUOTA INSTRUCTIONS**:
     ${targetInstructions}
     
+${isInterdisciplinary ? `
+    **INTERDISCIPLINARY MATCHING PROTOCOL (MANDATORY - THIS IS THE MOST IMPORTANT RULE)**:
+    The student requires a professor whose research covers MULTIPLE areas simultaneously.
+    Research Keywords: [${departmentKeywords.map(k => `"${k}"`).join(', ')}]
+
+    **STRICT AND-LOGIC**:
+    - A valid candidate MUST have demonstrated research or teaching activity in ALL of the following keywords, not just one:
+      ${departmentKeywords.map((k, i) => `Keyword ${i + 1}: "${k}"`).join('\n      ')}
+    - This is an AND relationship, NOT OR. A professor who only covers "${departmentKeywords[0]}" but not "${departmentKeywords[1] || departmentKeywords[0]}" is NOT a valid match.
+
+    **SEARCH STRATEGY**:
+    - Step 1: Search for each keyword COMBINATION together, e.g., query: "professor ${departmentKeywords.join(' ')} research"
+    - Step 2: For each candidate found, VERIFY they have publications or teaching in EVERY keyword.
+    - Step 3: If a professor only covers ${departmentKeywords.length - 1} out of ${departmentKeywords.length} keywords, they MAY be included but their matchScore MUST be penalized (subtract 20 points per missing keyword).
+
+    **SCORING RULE FOR INTERDISCIPLINARY**:
+    - Covers ALL ${departmentKeywords.length} keywords with evidence → matchScore 85-100
+    - Covers ${departmentKeywords.length - 1} keywords → matchScore 60-75 (mark missing keyword in researchFit)
+    - Covers only 1 keyword → matchScore ≤ 50 (include ONLY if no better candidates exist)
+
+    **researchFit FORMAT (MANDATORY FOR INTERDISCIPLINARY)**:
+    For each keyword, explicitly state whether covered:
+    ${departmentKeywords.map(k => `"${k}": ✅ 覆盖 / ❌ 未覆盖 + 说明`).join('\n    ')}
+` : ''}
+
     **ACADEMIC RANK / POSITION LOGIC (STRICT - DEFAULT IS FULL PROFESSOR)**:
     - **DEFAULT RULE**: If 'Target Position' is empty or vague, you MUST ONLY return **FULL PROFESSORS** (正教授).
     - **Regional Mapping**:
@@ -188,55 +418,40 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
       - User says "Associate" -> Full & Associate accepted.
       - User says "Assistant" or "Any" -> All accepted.
 
-    **CRITICAL EXECUTION PROTOCOL - NO 404s ALLOWED**:
-    1. **INDIVIDUAL PAGE DISCOVERY & URL VERIFICATION**:
-       - **Action**: You MUST search specifically for each potential candidate's name to find their **Official University Profile Page**.
-       - **Query**: Use queries like "Professor [Name] [University] official profile".
-       - **Validation**: 
-          - **CHECK 1**: Is the URL from the official university domain?
-          - **CHECK 2**: Is it a specific profile page (e.g., ends in ID or Name), NOT a general list/directory?
-          - **CHECK 3 (Crucial)**: If the URL looks like a generic list or a pattern-matched guess (e.g., just an ID you guessed), **DO NOT USE IT**. Search again.
-       - **Fallback**: If you cannot find a working, specific profile URL after searching, **DISCARD THE CANDIDATE**. Better to return fewer results than broken links.
-    
-    2. **DATA EXTRACTION**:
-       - Extract Research Areas, Email, and Recent Activity (2020-2025).
-       - **PROFILE PHOTO**: Attempt to find the URL of the professor's official profile photo.
+    **URL & DATA SOURCING RULES**:
+    - You are using Google Search and can see search result titles, snippets, and URLs.
+    - For profileUrl: ONLY copy a URL you directly see in Google Search results. Do NOT construct or guess URLs based on URL patterns.
+    - If no profile URL appears in search results for a professor, set profileUrl to "" (empty string).
+    - For email: ONLY use emails explicitly shown in search result snippets. If not found, set to "".
+    - For photoUrl: If you see a photo URL in search results, include it. Otherwise set to "".
+    - This protocol exists because you CANNOT open web pages to verify them. Only use what you SEE in search snippets.
 
-    3. **ADMISSION & PROGRAM DATA (MANDATORY)**:
-       - For each faculty, identify their University and Department.
-       - **SEARCH**: You MUST search for the specific PhD/Master application information for their department (e.g. "[Uni] [Dept] PhD admission deadline 2027").
-       - **EXTRACT THE FOLLOWING WITH SOURCE URLs**:
-         - **QS Ranking**: World ranking of the uni.
-         - **Deadline**: Next application deadline (Spring/Fall 2027).
-         - **Application Reqs**: GPA, English scores, etc.
-         - **RP Requirements**: Research Proposal specific word count/format.
-         - **Tuition**: International student tuition fee.
-         - **Scholarship**: Available funding/scholarship info.
-       - **Constraint**: If you cannot find exact 2027 data, find the most recent reliable info and note the source.
-
-    4. **NEGATIVE FILTER**: Exclude any names/universities in "EXCLUSIONS".
+    **NEGATIVE FILTER**: Exclude any names/universities in "EXCLUSIONS".
 
     **OUTPUT RULES**:
-    - **QS Ranking**: Include current QS World Ranking.
+    - **QS Ranking**: Include current QS World Ranking (e.g., "QS 2025: #15").
     - **Email**: Must be the official academic email.
     - **Research Areas**: Format as "English Term (中文翻译)".
     - **Match Reasoning**: Chinese, concise, verified.
     - **Language**: Simplified Chinese.
-    - **URL sources**: For every admission data point, provide the \`sourceUrl\`.
 
-    **RECENT ACADEMIC ACTIVITIES (2020-2025) - DETAILED PAPERS & PROJECTS**:
+    **RECENT ACADEMIC ACTIVITIES (${currentYear - 5}-${currentYear}) - DETAILED PAPERS & PROJECTS**:
     - **MANDATORY CONTENT**: You MUST include the **Full Title** of the paper or project. 
-    - **WARNING**: DO NOT output lines like "[2025][Type]" with no content. That is a failure.
-    - **STRICT FORMAT**: \`[Year][Type-Level] Actual Title (Chinese Translation) - Source\`
-      - Correct: \`[2025][论文-顶刊] Learning from Noise (从噪声中学习) - CVPR\`
-      - Incorrect: \`[2025][论文-顶刊]\` (MISSING CONTENT)
-    - **Types**: \`[论文-顶刊]\`, \`[论文-期刊]\`, \`[论文-会议]\`, \`[项目-国家级]\`, \`[项目-省部级]\`.
+    - **MANDATORY METADATA**: Every item MUST include the **Year** and **Type** (Journal vs Conference).
+    - **STRICT FORMAT**: '[Year][Type-Level] Actual Title (Chinese Translation) - Source'
+      - **Type-Level** examples: '[论文-顶刊]', '[论文-期刊]', '[论文-会议]', '[项目-国家级]', '[项目-省部级]'.
+      - **Source** examples: 'Nature', 'Science', 'CVPR', 'ICML', 'IEEE Transactions on...', 'Journal of...'.
+      - Correct: '[2024][论文-顶刊] Learning from Noise (从噪声中学习) - CVPR'
+      - Correct: '[2023][论文-期刊] Deep Learning in Medicine (医学中的深度学习) - Nature Communications'
+      - Incorrect: '[2025][论文-顶刊]' (MISSING TITLE)
+      - Incorrect: 'Learning from Noise' (MISSING METADATA)
     - **2025 PRIORITY**: Aggressively search for 2025 works (Accepted, In Press, Preprints). **DO NOT IGNORE 2025**.
-    - **QUANTITY**: **List AT LEAST 5 items**. Fill the list with relevant papers.
+    - **QUANTITY**: List papers/activities you find in Google Search results. 2-3 real items is better than 5 fabricated ones. If you find none, return empty array [].
+    - **VERIFICATION**: If the year or type is not immediately clear, search for the paper title to find its publication details.
 
     **SORTING**:
-    - **STRICTLY Reverse Chronological**: 2025 -> 2024 -> 2023 -> 2022 -> 2021 -> 2020.
-    - Top of the list MUST be the newest (2025/2024).
+    - **STRICTLY Reverse Chronological**: ${currentYear} -> ${currentYear-1} -> ${currentYear-2}.
+    - Top of the list MUST be the newest (${currentYear}/${currentYear-1}).
 
     Constraints:
     - **No Hallucinations**: If a URL or email is uncertain, DROP the candidate.
@@ -246,15 +461,6 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
   if (manualContent && manualContent.trim().length > 0) {
     promptContent += `\nProvided Text Content:\n${manualContent}`;
   }
-
-  const sourceDataSchema = {
-    type: Type.OBJECT,
-    properties: {
-        value: { type: Type.STRING, description: "The content/value extracted." },
-        sourceUrl: { type: Type.STRING, description: "The specific URL where this info was found." }
-    },
-    required: ["value", "sourceUrl"]
-  };
 
   const responseSchema: Schema = {
     type: Type.ARRAY,
@@ -273,25 +479,19 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
         profileUrl: { type: Type.STRING },
         photoUrl: { type: Type.STRING, description: "URL to the professor's profile photo" },
         email: { type: Type.STRING },
-        
-        // New Admission Data Fields
         qsRanking: { type: Type.STRING },
-        qsRankingData: sourceDataSchema,
-        deadlineData: sourceDataSchema,
-        applicationReqsData: sourceDataSchema,
-        rpReqsData: sourceDataSchema,
-        tuitionData: sourceDataSchema,
-        scholarshipData: sourceDataSchema,
-        programUrl: { type: Type.STRING, description: "URL for the specific department/program admission page" },
-        universityUrl: { type: Type.STRING, description: "URL for the main university website" },
-
         matchReasoning: {
           type: Type.OBJECT,
           properties: {
             locationCheck: { type: Type.STRING },
             universityCheck: { type: Type.STRING },
             departmentCheck: { type: Type.STRING },
-            researchFit: { type: Type.STRING },
+            researchFit: { 
+              type: Type.STRING, 
+              description: isInterdisciplinary 
+                ? `MUST evaluate EACH keyword separately. Format: "Keyword1: ✅/❌ evidence; Keyword2: ✅/❌ evidence; ...". Keywords: [${departmentKeywords.join(', ')}]`
+                : "Academic background alignment analysis"
+            },
             positionCheck: { type: Type.STRING },
             activityCheck: { type: Type.STRING },
             reputationCheck: { type: Type.STRING }
@@ -299,7 +499,7 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
           required: ["locationCheck", "universityCheck", "departmentCheck", "researchFit", "positionCheck", "activityCheck", "reputationCheck"]
         }
       },
-      required: ["name", "title", "university", "matchScore", "researchAreas", "alignmentDetails", "isActive", "activitySummary", "recentActivities", "matchReasoning", "profileUrl"]
+      required: ["name", "title", "university", "matchScore", "researchAreas", "alignmentDetails", "isActive", "activitySummary", "recentActivities", "matchReasoning"]
     }
   };
 
@@ -315,7 +515,25 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
     });
 
     const jsonText = response.text || "[]";
-    return JSON.parse(jsonText) as FacultyMember[];
+    const rawResults = JSON.parse(jsonText) as FacultyMember[];
+    // 清洗：过滤明显无效的数据
+    return rawResults.map(prof => ({
+      ...prof,
+      // URL 基础验证：必须是 http(s) 开头且非纯域名首页
+      profileUrl: (() => {
+        if (!prof.profileUrl) return '';
+        try {
+          const u = new URL(prof.profileUrl);
+          if (!['http:', 'https:'].includes(u.protocol)) return '';
+          if (u.pathname === '/' || u.pathname === '') return '';
+          return prof.profileUrl;
+        } catch { return ''; }
+      })(),
+      // email 格式验证
+      email: prof.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(prof.email) ? prof.email : '',
+      // photoUrl 验证
+      photoUrl: prof.photoUrl && prof.photoUrl.startsWith('http') ? prof.photoUrl : '',
+    }));
   } catch (error) {
     console.error("Faculty matching failed:", error);
     throw error;
@@ -891,9 +1109,13 @@ export const searchFacultyByWeb = async (query: string): Promise<FacultyMember[]
     Instructions:
     1. Use Google Search to find official faculty profiles, university directories, or academic pages.
     2. Extract detailed information for each faculty member found.
-    3. **CRITICAL**: You must find the **Official University Profile Page** and use it as the \`profileUrl\`.
+    3. **CRITICAL**: You must find the **Official University Profile Page** and use it as the 'profileUrl'.
     4. **CRITICAL**: You must find the **Official Email** address.
     5. **CRITICAL**: You must find **Recent Academic Activities** (papers, projects) from 2020-2025.
+       - **STRICT FORMAT**: '[Year][Type-Level] Actual Title (Chinese Translation) - Source'
+       - **Type-Level**: '[论文-顶刊]', '[论文-期刊]', '[论文-会议]', '[项目-国家级]', '[项目-省部级]'.
+       - **Source**: The journal name or conference name (e.g., Nature, CVPR).
+       - **MANDATORY**: Every activity MUST have a Year and a Type. Search for the paper title specifically if needed to find these details.
     
     Output Format: JSON Array of FacultyMember objects.
     
@@ -955,6 +1177,7 @@ export const searchUniversityInfo = async (university: string, department?: stri
     Instructions:
     1. Search for the **Official Graduate Admission Page** for this specific program.
     2. Extract the following data points with their source URLs.
+    3. **QS Ranking**: Search specifically for "QS World University Rankings 2025" or "2024" to ensure accuracy. Use the official QS website (topuniversities.com) as the primary source.
     
     Output Schema (JSON):
     {
@@ -967,6 +1190,8 @@ export const searchUniversityInfo = async (university: string, department?: stri
       "scholarships": { "value": "Available funding types", "sourceUrl": "..." },
       "programs": ["Program A", "Program B"]
     }
+
+    **IMPORTANT**: If you did NOT find a specific data point in search results, set its value to "未找到官方数据" and sourceUrl to "". Do NOT estimate or fabricate numbers. Returning "未找到" for all fields is acceptable and honest.
   `;
 
   try {
@@ -990,6 +1215,7 @@ export const searchUniversityInfo = async (university: string, department?: stri
 
 export const refreshFacultyData = async (existing: FacultyMember): Promise<FacultyMember> => {
   const ai = getClient();
+  const currentYear = new Date().getFullYear();
   const prompt = `
     Task: Update and verify information for this faculty member:
     Name: ${existing.name}
@@ -998,7 +1224,9 @@ export const refreshFacultyData = async (existing: FacultyMember): Promise<Facul
     
     Instructions:
     1. Search for the latest official profile.
-    2. Update **Recent Activities** (2024-2025 focus).
+    2. Update **Recent Activities** (${currentYear - 1}-${currentYear} focus).
+       - **STRICT FORMAT**: '[Year][Type-Level] Actual Title (Chinese Translation) - Source'
+       - **MANDATORY**: Every activity MUST have a Year and a Type (Journal/Conference).
     3. Verify **Email** and **Title**.
     4. Check if they are still active at this university.
     

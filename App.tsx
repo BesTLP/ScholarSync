@@ -149,6 +149,24 @@ function App() {
     setClients([...clients, newClient]);
   };
 
+  const batchAddClients = (newClients: Client[]) => {
+    console.log('App: Batch adding clients', newClients.length);
+    const processedClients = newClients.map(c => ({
+      ...c,
+      id: c.id || Math.random().toString(36).substr(2, 9)
+    }));
+
+    setClients(prev => {
+      const clientMap = new Map(prev.map(c => [c.id, c]));
+      processedClients.forEach(c => {
+        clientMap.set(c.id, c);
+      });
+      const result = Array.from(clientMap.values());
+      console.log('App: Total clients after batch add', result.length);
+      return result;
+    });
+  };
+
   const updateClient = (updatedClient: Client) => {
     setClients(clients.map(c => c.id === updatedClient.id ? updatedClient : c));
     if (selectedClient?.id === updatedClient.id) {
@@ -157,24 +175,20 @@ function App() {
   };
 
   const deleteClient = (clientId: string) => {
-    // 1. Remove from clients
-    setClients(prev => prev.filter(c => c.id !== clientId));
+    console.log('App: Deleting client', clientId);
+    window.alert('正在删除客户: ' + clientId);
+    setClients(prev => {
+      const filtered = prev.filter(c => c.id !== clientId);
+      console.log('App: Clients after deletion', filtered.length);
+      return filtered;
+    });
     
-    // 2. Clean up faculty database links
-    setFacultyDatabase(prev => prev.map(f => {
-      if (f.linkedClientIds?.includes(clientId)) {
-        return {
-          ...f,
-          linkedClientIds: f.linkedClientIds.filter(id => id !== clientId)
-        };
-      }
-      return f;
-    }));
+    setFacultyDatabase(prev => prev.map(f => ({
+      ...f,
+      linkedClientIds: f.linkedClientIds?.filter(id => id !== clientId) || []
+    })));
 
-    // 3. Clear selected client if it was the one deleted
-    if (selectedClient?.id === clientId) {
-      setSelectedClient(null);
-    }
+    setSelectedClient(prev => prev?.id === clientId ? null : prev);
   };
 
   // Faculty Database Operations
@@ -394,59 +408,61 @@ function App() {
     };
   }, [isDragging]);
 
-  const renderContent = () => {
-    if (activeTab === 'users' && selectedClient) {
-      return (
-        <ClientDetail 
-          client={selectedClient} 
-          onBack={() => {
-            setSelectedClient(null);
-            setActiveTab(previousTab || 'users');
-          }} 
-          initialTab={clientDetailInitialTab}
-          onStartWriting={(type) => {
-            const tabMap: Record<string, TabId> = {
-              '文书Agent': 'agent',
-              '写PS': 'ps',
-              '写命题文书': 'essay',
-              '写推荐信': 'lor',
-              '写CV': 'cv',
-              '自由创作': 'freewrite'
-            };
-            if (type) {
-              setActiveTab(tabMap[type] || 'freewrite');
-            } else {
-              setActiveTab('freewrite');
-            }
-          }}
-          onEditDocument={(doc) => {
-            const typeMap: Record<string, TabId> = {
-              'PS': 'ps',
-              'Essay': 'essay',
-              'LOR': 'lor',
-              'CV': 'cv',
-              'Free Writing': 'freewrite'
-            };
-            setEditingDocument({
-              id: doc.id,
-              content: doc.content,
-              type: doc.type,
-              title: doc.title
-            });
-            setActiveTab(typeMap[doc.type] || 'freewrite');
-          }}
-          onUpdateClient={updateClient}
-          onDeleteClient={deleteClient}
-          facultyDatabase={facultyDatabase}
-          onLinkFacultyToClient={linkFacultyToClient}
-          onUnlinkFacultyFromClient={unlinkFacultyFromClient}
-        />
-      );
-    }
+  return (
+    <Layout activeTab={activeTab} onTabChange={setActiveTab}>
+      <div className="h-full w-full relative">
+        {/* Detail View: ClientDetail (Conditional) */}
+        {activeTab === 'users' && selectedClient && (
+          <div className="absolute inset-0 z-20 bg-[#F7F8FA]">
+            <ClientDetail 
+              client={selectedClient} 
+              onBack={() => {
+                setSelectedClient(null);
+                setActiveTab(previousTab || 'users');
+              }} 
+              initialTab={clientDetailInitialTab}
+              onStartWriting={(type) => {
+                const tabMap: Record<string, TabId> = {
+                  '文书Agent': 'agent',
+                  '写PS': 'ps',
+                  '写命题文书': 'essay',
+                  '写推荐信': 'lor',
+                  '写CV': 'cv',
+                  '自由创作': 'freewrite'
+                };
+                if (type) {
+                  setActiveTab(tabMap[type] || 'freewrite');
+                } else {
+                  setActiveTab('freewrite');
+                }
+              }}
+              onEditDocument={(doc) => {
+                const typeMap: Record<string, TabId> = {
+                  'PS': 'ps',
+                  'Essay': 'essay',
+                  'LOR': 'lor',
+                  'CV': 'cv',
+                  'Free Writing': 'freewrite'
+                };
+                setEditingDocument({
+                  id: doc.id,
+                  content: doc.content,
+                  type: doc.type,
+                  title: doc.title
+                });
+                setActiveTab(typeMap[doc.type] || 'freewrite');
+              }}
+              onUpdateClient={updateClient}
+              onDeleteClient={deleteClient}
+              facultyDatabase={facultyDatabase}
+              onLinkFacultyToClient={linkFacultyToClient}
+              onUnlinkFacultyFromClient={unlinkFacultyFromClient}
+            />
+          </div>
+        )}
 
-    switch (activeTab) {
-      case 'dashboard':
-        return (
+        {/* Main Tabs (Keep-Alive) */}
+        <div className={activeTab === 'dashboard' ? 'block h-full' : 'hidden'}>
           <Dashboard 
             onTabChange={setActiveTab} 
             clients={clients} 
@@ -456,10 +472,11 @@ function App() {
               setClientDetailInitialTab('profile'); 
               setActiveTab('users'); 
             }} 
+            onUpdateClient={updateClient}
           />
-        );
-      case 'faculty-matcher':
-        return (
+        </div>
+
+        <div className={activeTab === 'faculty-matcher' ? 'block h-full' : 'hidden'}>
           <FacultyMatcher 
             clients={clients}
             selectedClient={selectedClient}
@@ -469,9 +486,9 @@ function App() {
             onUpdateClient={updateClient}
             onAddClient={(name, parsedData) => addClient({ name, ...parsedData })}
           />
-        );
-      case 'faculty-db':
-        return (
+        </div>
+
+        <div className={activeTab === 'faculty-db' ? 'block h-full' : 'hidden'}>
           <FacultyDatabase 
             facultyDatabase={facultyDatabase}
             clients={clients}
@@ -481,26 +498,28 @@ function App() {
             onLinkFaculty={linkFacultyToClient}
             onUnlinkFaculty={unlinkFacultyFromClient}
           />
-        );
-      case 'users':
-        return (
+        </div>
+
+        <div className={activeTab === 'users' && !selectedClient ? 'block h-full' : 'hidden'}>
           <ClientArchives 
             clients={clients} 
             onAddClient={(name, parsedData) => addClient({ name, ...parsedData })} 
+            onBatchAddClients={batchAddClients}
             onSelectClient={(c) => { 
               setPreviousTab(activeTab);
               setSelectedClient(c); 
               setClientDetailInitialTab('profile'); 
             }} 
             onUpdateClient={updateClient}
+            onDeleteClient={deleteClient}
             onRestoreClient={(id) => {
               const client = clients.find(c => c.id === id);
               if (client) updateClient({ ...client, status: 'active' });
             }}
           />
-        );
-      case 'projects':
-        return (
+        </div>
+
+        <div className={activeTab === 'projects' ? 'block h-full' : 'hidden'}>
           <MyWorks 
             clients={clients} 
             onCreateNew={() => setActiveTab('freewrite')} 
@@ -529,9 +548,9 @@ function App() {
             }}
             onTabChange={setActiveTab}
           />
-        );
-      case 'agent':
-        return (
+        </div>
+
+        <div className={activeTab === 'agent' ? 'block h-full' : 'hidden'}>
           <EssayAgentEntry 
             clients={clients} 
             onAddClient={(name, parsedData) => addClient({ name, ...parsedData })} 
@@ -542,42 +561,41 @@ function App() {
               setActiveTab('users');
             }} 
           />
-        );
-      case 'ps':
-        return <PSWorkbench clients={clients} onAddClientClick={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'PS' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />;
-      case 'essay':
-        return <PromptEssayWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'Essay' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />;
-      case 'lor':
-        return <LORWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'LOR' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />;
-      case 'cv':
-        return <CVWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'CV' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />;
-      case 'freewrite':
-        return <FreeWriteWorkbench clients={clients} onTabChange={setActiveTab} onAddClientClick={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'Free Writing' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />;
-      case 'ai-shield':
-        return <AIShieldWorkbench clients={clients} onSaveDocument={saveDocument} initialClientId={selectedClient?.id} onBack={() => setActiveTab('users')} />;
-      case 'share':
-        return <ComingSoon title="推广合作" />;
-      case 'settings':
-        return <ComingSoon title="设置" />;
-      default:
-        return (
-          <Dashboard 
-            onTabChange={setActiveTab} 
-            clients={clients} 
-            onSelectClient={(c) => { 
-              setPreviousTab(activeTab);
-              setSelectedClient(c); 
-              setClientDetailInitialTab('profile'); 
-              setActiveTab('users'); 
-            }} 
-          />
-        );
-    }
-  };
+        </div>
 
-  return (
-    <Layout activeTab={activeTab} onTabChange={setActiveTab}>
-      {renderContent()}
+        <div className={activeTab === 'ps' ? 'block h-full' : 'hidden'}>
+          <PSWorkbench clients={clients} onAddClientClick={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'PS' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />
+        </div>
+
+        <div className={activeTab === 'essay' ? 'block h-full' : 'hidden'}>
+          <PromptEssayWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'Essay' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />
+        </div>
+
+        <div className={activeTab === 'lor' ? 'block h-full' : 'hidden'}>
+          <LORWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'LOR' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />
+        </div>
+
+        <div className={activeTab === 'cv' ? 'block h-full' : 'hidden'}>
+          <CVWorkbench clients={clients} onAddClient={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'CV' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />
+        </div>
+
+        <div className={activeTab === 'freewrite' ? 'block h-full' : 'hidden'}>
+          <FreeWriteWorkbench clients={clients} onTabChange={setActiveTab} onAddClientClick={() => setIsCreateClientModalOpen(true)} onSaveDocument={saveDocument} initialDocument={editingDocument?.type === 'Free Writing' ? editingDocument : undefined} onBack={() => { setEditingDocument(null); setActiveTab('users'); }} initialClientId={selectedClient?.id} />
+        </div>
+
+        <div className={activeTab === 'ai-shield' ? 'block h-full' : 'hidden'}>
+          <AIShieldWorkbench clients={clients} onSaveDocument={saveDocument} initialClientId={selectedClient?.id} onBack={() => setActiveTab('users')} />
+        </div>
+
+        <div className={activeTab === 'share' ? 'block h-full' : 'hidden'}>
+          <ComingSoon title="推广合作" />
+        </div>
+
+        <div className={activeTab === 'settings' ? 'block h-full' : 'hidden'}>
+          <ComingSoon title="设置" />
+        </div>
+      </div>
+
       <CreateClientModal 
         isOpen={isCreateClientModalOpen}
         onClose={() => setIsCreateClientModalOpen(false)}

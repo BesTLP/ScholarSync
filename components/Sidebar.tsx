@@ -45,26 +45,25 @@ interface NavItemProps {
 
 const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick, isCollapsed }) => {
   return (
-    <div
-      onClick={onClick}
-      className={`
-        relative flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-6'} py-3 cursor-pointer transition-colors duration-200 group
-        ${isActive ? 'bg-[#E6F4FF] text-[#0070FF]' : 'text-gray-600 hover:bg-[#FAFAFA] hover:text-gray-900'}
-      `}
-      title={isCollapsed ? label : ''}
-    >
-      {isActive && (
-        <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-[#0070FF]" />
-      )}
-      <Icon size={18} className={`${isCollapsed ? '' : 'mr-3'}`} strokeWidth={2} />
-      {!isCollapsed && <span className="text-sm font-medium">{label}</span>}
-      
-      {/* Tooltip for collapsed state */}
-      {isCollapsed && (
-        <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
-          {label}
-        </div>
-      )}
+    <div className="px-3 py-1">
+      <div
+        onClick={onClick}
+        className={`
+          relative flex items-center ${isCollapsed ? 'justify-center p-2' : 'px-4 py-2.5'} cursor-pointer transition-all duration-300 ease-out group
+          ${isActive ? 'bg-white/60 backdrop-blur-sm shadow-sm rounded-xl text-blue-600 font-semibold' : 'text-gray-600 hover:bg-white/40 hover:text-gray-900 rounded-xl'}
+        `}
+        title={isCollapsed ? label : ''}
+      >
+        <Icon size={18} className={`${isCollapsed ? '' : 'mr-3'} transition-transform duration-300 group-hover:scale-110`} strokeWidth={isActive ? 2.5 : 2} />
+        {!isCollapsed && <span className="text-sm">{label}</span>}
+        
+        {/* Tooltip for collapsed state */}
+        {isCollapsed && (
+          <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900/80 backdrop-blur-md text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg">
+            {label}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -79,14 +78,14 @@ const NavGroup: React.FC<NavGroupProps> = ({ title, children, isCollapsed }) => 
   return (
     <div className="mb-2 mt-4">
       {!isCollapsed && (
-        <div className="px-6 py-2 text-xs font-semibold text-gray-400 tracking-wider">
+        <div className="px-6 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-[0.15em]">
           {title}
         </div>
       )}
       {isCollapsed && (
-        <div className="h-px bg-gray-100 mx-4 my-2" />
+        <div className="h-px bg-gray-200/50 mx-4 my-3" />
       )}
-      <div>{children}</div>
+      <div className={`${isCollapsed ? 'space-y-1' : 'space-y-0.5'}`}>{children}</div>
     </div>
   );
 };
@@ -100,26 +99,26 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isCollapsed, onToggleCollapse }) => {
   return (
-    <div className={`${isCollapsed ? 'w-[80px]' : 'w-[260px]'} h-screen bg-[#FFFFFF] border-r border-[#F0F0F0] flex flex-col shrink-0 overflow-hidden transition-all duration-300`}>
+    <div className={`${isCollapsed ? 'w-[80px]' : 'w-[260px]'} h-screen glass border-r border-white/40 flex flex-col shrink-0 overflow-hidden transition-all duration-300 ease-out z-50`}>
       {/* Logo Area */}
       <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'} px-6 py-6 shrink-0`}>
         {!isCollapsed && (
           <div className="flex items-center">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#E6F4FF] text-[#0070FF] mr-3">
-              <Triangle size={18} fill="currentColor" strokeWidth={0} />
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white mr-3 shadow-md shadow-blue-500/20">
+              <Triangle size={16} fill="currentColor" strokeWidth={0} />
             </div>
             <span className="text-xl font-bold tracking-tight text-gray-900">留学咩</span>
           </div>
         )}
         {isCollapsed && (
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#E6F4FF] text-[#0070FF]">
-            <Triangle size={18} fill="currentColor" strokeWidth={0} />
+          <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/20">
+            <Triangle size={16} fill="currentColor" strokeWidth={0} />
           </div>
         )}
         
         <button 
           onClick={onToggleCollapse}
-          className={`text-gray-400 hover:text-gray-600 transition-colors ${isCollapsed ? 'absolute bottom-8 left-1/2 -translate-x-1/2' : ''}`}
+          className={`text-gray-400 hover:text-gray-700 transition-colors p-1.5 hover:bg-white/50 rounded-lg ${isCollapsed ? 'absolute bottom-8 left-1/2 -translate-x-1/2' : ''}`}
         >
           {isCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </button>

@@ -119,6 +119,18 @@ export interface ClientDocument {
   updatedAt: string;
 }
 
+export interface ClientEvent {
+  id: string;
+  clientId: string;
+  title: string;            // 事件标题，如 "帝国理工 DDL"
+  date: string;             // ISO 日期 YYYY-MM-DD
+  time?: string;            // 可选时间 HH:mm
+  type: 'deadline' | 'interview' | 'submission' | 'meeting' | 'reminder' | 'other';
+  description?: string;     // 备注
+  priority: 'high' | 'medium' | 'low';
+  completed: boolean;
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -177,4 +189,5 @@ export interface Client {
   selectionDeadline?: string;          // DDL，如 "11.28"
   avoidPreviousMentors?: string;       // 是否避开之前导师及详情
   linkedFacultyIds?: string[];
+  events?: ClientEvent[];
 }

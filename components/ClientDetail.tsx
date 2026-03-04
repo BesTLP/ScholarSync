@@ -35,9 +35,11 @@ import {
   Download,
   Link as LinkIcon,
   UserPlus,
-  ArchiveRestore
+  ArchiveRestore,
+  Upload,
+  CheckCircle2
 } from 'lucide-react';
-import { Client, FacultyRecord } from '../types';
+import { Client, FacultyRecord, ClientEvent } from '../types';
 import FacultyCard from './FacultyCard';
 
 interface ClientDetailProps {
@@ -104,7 +106,7 @@ const InputField = ({ label, placeholder, type = "text", selectOptions, value, o
       ) : (
         <div className="relative">
           <input 
-            type={type === 'date' ? 'text' : type} 
+            type={type} 
             placeholder={type === 'date' ? 'YYYY-MM-DD' : placeholder}
             value={value}
             onChange={e => onChange?.(e.target.value)}
@@ -144,7 +146,17 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
   const [contactForm, setContactForm] = useState({ type: 'phone' as 'phone' | 'address' | 'email', value: '' });
   const [researchForm, setResearchForm] = useState({ title: '', journal: '', date: '', link: '' });
   const [identityForm, setIdentityForm] = useState({ type: '身份证', number: '', expiry: '' });
+  const [eventForm, setEventForm] = useState<Partial<ClientEvent>>({
+    title: '',
+    date: '',
+    time: '',
+    type: 'other',
+    description: '',
+    priority: 'medium',
+    completed: false
+  });
   const [avatarUrlInput, setAvatarUrlInput] = useState('');
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -254,11 +266,79 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
     setActiveModal(null);
   };
 
+  const handleSaveEvent = () => {
+    if (!eventForm.title || !eventForm.date) {
+      alert('请输入标题和日期');
+      return;
+    }
+    
+    const newEvent: ClientEvent = {
+      id: eventForm.id || crypto.randomUUID(),
+      clientId: client.id,
+      title: eventForm.title,
+      date: eventForm.date,
+      time: eventForm.time,
+      type: eventForm.type as any,
+      description: eventForm.description,
+      priority: eventForm.priority as any,
+      completed: eventForm.completed || false
+    };
+
+    let updatedEvents;
+    if (eventForm.id) {
+      updatedEvents = (client.events || []).map(e => e.id === eventForm.id ? newEvent : e);
+    } else {
+      updatedEvents = [...(client.events || []), newEvent];
+    }
+
+    onUpdateClient({
+      ...client,
+      events: updatedEvents
+    });
+    
+    setEventForm({ title: '', date: '', time: '', type: 'other', description: '', priority: 'medium', completed: false });
+    setActiveModal(null);
+  };
+
+  const handleDeleteEvent = (eventId: string) => {
+    if (confirm('确定要删除该事件吗？')) {
+      const updatedEvents = (client.events || []).filter(e => e.id !== eventId);
+      onUpdateClient({
+        ...client,
+        events: updatedEvents
+      });
+    }
+  };
+
+  const handleToggleEventComplete = (eventId: string) => {
+    const updatedEvents = (client.events || []).map(e => 
+      e.id === eventId ? { ...e, completed: !e.completed } : e
+    );
+    onUpdateClient({
+      ...client,
+      events: updatedEvents
+    });
+  };
+
   const handleUpdateAvatar = () => {
     if (avatarUrlInput) {
       onUpdateClient({ ...client, avatarUrl: avatarUrlInput });
     }
     setActiveModal(null);
+  };
+
+  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result as string;
+        if (result) {
+          setAvatarUrlInput(result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleGenerateAnalysis = async () => {
@@ -293,7 +373,8 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
   };
 
   const handleDeleteClient = () => {
-    if (confirm('确定要删除该客户吗？此操作无法撤销。')) {
+    if (window.confirm('确定要删除该客户吗？此操作无法撤销。')) {
+      console.log('Deleting client from detail view:', client.id);
       onDeleteClient?.(client.id);
       onBack();
     }
@@ -329,31 +410,31 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
   };
 
   const InfoCard = ({ icon: Icon, title, children, onAdd, items, renderItem }: { icon: any, title: string, children?: React.ReactNode, onAdd?: () => void, items?: any[], renderItem?: (item: any) => React.ReactNode }) => (
-    <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-shadow relative group">
+    <div className="glass rounded-3xl border border-white/50 p-6 shadow-sm hover:shadow-md transition-all duration-300 relative group hover:scale-[1.01]">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
-          <div className="p-2 bg-gray-50 rounded-lg text-gray-400 group-hover:bg-cyan-50 group-hover:text-cyan-500 transition-colors">
+          <div className="p-2 bg-white/60 backdrop-blur-sm rounded-xl text-gray-500 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors shadow-sm">
             <Icon size={18} />
           </div>
-          <h4 className="text-sm font-bold text-gray-900">{title}</h4>
+          <h4 className="text-sm font-bold text-gray-900 tracking-tight">{title}</h4>
         </div>
         {onAdd && (
           <div className="relative" ref={title === '联系方式' ? contactMenuRef : null}>
-            <button onClick={onAdd} className="p-1 text-gray-300 hover:text-cyan-500 transition-colors">
+            <button onClick={onAdd} className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-white/50 rounded-lg transition-all active:scale-95">
               <Plus size={16} />
             </button>
             {title === '联系方式' && showContactMenu && (
-              <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="absolute top-full right-0 mt-2 w-48 glass rounded-2xl shadow-xl border border-white/50 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                 <button 
                   onClick={() => { setActiveModal('contact'); setContactForm({ type: 'phone', value: '' }); setShowContactMenu(false); }}
-                  className="w-full flex items-center px-4 py-3 text-xs font-bold text-gray-700 hover:bg-gray-50 transition-colors"
+                  className="w-full flex items-center px-4 py-3 text-xs font-bold text-gray-700 hover:bg-white/60 transition-colors"
                 >
-                  <Phone size={14} className="mr-3 text-cyan-500" />
+                  <Phone size={14} className="mr-3 text-blue-500" />
                   添加联系方式
                 </button>
                 <button 
                   onClick={() => { setActiveModal('contact'); setContactForm({ type: 'address', value: '' }); setShowContactMenu(false); }}
-                  className="w-full flex items-center px-4 py-3 text-xs font-bold text-gray-700 hover:bg-gray-50 transition-colors"
+                  className="w-full flex items-center px-4 py-3 text-xs font-bold text-gray-700 hover:bg-white/60 transition-colors"
                 >
                   <MapPin size={14} className="mr-3 text-orange-500" />
                   添加地址
@@ -373,14 +454,14 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
             ))}
           </div>
         ) : children || (
-          <div className="flex flex-col items-center justify-center py-4 text-center">
-            <div className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center text-gray-200 mb-2">
+          <div className="flex flex-col items-center justify-center py-6 text-center bg-white/30 rounded-2xl border border-dashed border-gray-200/50">
+            <div className="w-10 h-10 bg-white/50 rounded-full flex items-center justify-center text-gray-400 mb-2 shadow-sm">
               <Icon size={20} />
             </div>
-            <p className="text-[10px] text-gray-400">暂无{title}</p>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">暂无{title}</p>
             <button 
               onClick={onAdd}
-              className="mt-2 px-3 py-1 bg-cyan-50 text-cyan-600 rounded-lg text-[10px] font-bold hover:bg-cyan-100 transition-colors"
+              className="mt-3 px-4 py-1.5 bg-blue-50/50 text-blue-600 rounded-xl text-[10px] font-bold hover:bg-blue-100 transition-all shadow-sm active:scale-95"
             >
               添加信息
             </button>
@@ -400,6 +481,121 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
       />
     </div>
   );
+
+  const renderTimeline = () => {
+    const events = [...(client.events || [])].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const today = new Date().toISOString().split('T')[0];
+
+    return (
+      <div className="glass rounded-3xl border border-white/50 p-6 shadow-sm hover:shadow-md transition-all duration-300 relative group hover:scale-[1.01] col-span-2">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center space-x-2">
+            <div className="p-2 bg-white/60 backdrop-blur-sm rounded-xl text-gray-500 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors shadow-sm">
+              <Calendar size={18} />
+            </div>
+            <h4 className="text-sm font-bold text-gray-900 tracking-tight">关键日程</h4>
+          </div>
+          <button 
+            onClick={() => {
+              setEventForm({ title: '', date: '', time: '', type: 'other', description: '', priority: 'medium', completed: false });
+              setActiveModal('event');
+            }} 
+            className="flex items-center px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-all"
+          >
+            <Plus size={14} className="mr-1" />
+            添加事件
+          </button>
+        </div>
+
+        {events.length > 0 ? (
+          <>
+            {/* Horizontal Timeline */}
+            <div className="mb-8 overflow-x-auto custom-scrollbar pb-4">
+              <div className="flex items-center min-w-max px-4">
+                {events.map((event, index) => {
+                  const isPast = event.date < today;
+                  const isCompleted = event.completed;
+                  return (
+                    <div key={event.id} className="flex items-center">
+                      <div className="flex flex-col items-center relative">
+                        <div className={`w-4 h-4 rounded-full flex items-center justify-center z-10 ${isCompleted ? 'bg-emerald-500 text-white' : isPast ? 'bg-gray-400' : 'bg-white border-2 border-blue-500'}`}>
+                          {isCompleted && <CheckCircle2 size={10} />}
+                        </div>
+                        <div className="absolute top-6 flex flex-col items-center w-24">
+                          <span className="text-[10px] font-bold text-gray-500">{event.date.slice(5)}</span>
+                          <span className="text-[10px] text-gray-700 truncate w-full text-center" title={event.title}>{event.title}</span>
+                        </div>
+                      </div>
+                      {index < events.length - 1 && (
+                        <div className={`h-0.5 w-16 ${isCompleted || isPast ? 'bg-gray-300' : 'bg-gray-200'}`} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Event List */}
+            <div className="space-y-3">
+              {events.map(event => {
+                const typeColors: Record<string, string> = {
+                  deadline: 'bg-red-50 text-red-700 border-red-200',
+                  interview: 'bg-blue-50 text-blue-700 border-blue-200',
+                  submission: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                  meeting: 'bg-purple-50 text-purple-700 border-purple-200',
+                  reminder: 'bg-orange-50 text-orange-700 border-orange-200',
+                  other: 'bg-gray-50 text-gray-700 border-gray-200'
+                };
+                const colorClass = typeColors[event.type] || typeColors.other;
+                const priorityClass = event.priority === 'high' ? 'border-l-4 border-l-red-500' : event.priority === 'medium' ? 'border-l-4 border-l-orange-500' : '';
+
+                return (
+                  <div key={event.id} className={`p-4 rounded-xl border flex items-start justify-between ${colorClass} ${priorityClass} ${event.completed ? 'opacity-50 grayscale' : ''}`}>
+                    <div className="flex items-start space-x-3">
+                      <button 
+                        onClick={() => handleToggleEventComplete(event.id)}
+                        className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${event.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-gray-300 text-transparent hover:border-emerald-500'}`}
+                      >
+                        <CheckCircle2 size={14} />
+                      </button>
+                      <div>
+                        <div className="flex items-center space-x-2 mb-1">
+                          <span className={`text-sm font-bold ${event.completed ? 'line-through' : ''}`}>{event.title}</span>
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 bg-white/50 rounded">{event.date} {event.time}</span>
+                        </div>
+                        {event.description && <p className="text-xs opacity-80 mt-1">{event.description}</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <button 
+                        onClick={() => { setEventForm(event); setActiveModal('event'); }}
+                        className="p-1.5 text-current opacity-60 hover:opacity-100 hover:bg-white/50 rounded-lg transition-all"
+                      >
+                        <Edit2 size={14} />
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteEvent(event.id)}
+                        className="p-1.5 text-current opacity-60 hover:opacity-100 hover:bg-white/50 rounded-lg transition-all"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-8 text-center bg-white/30 rounded-2xl border border-dashed border-gray-200/50">
+            <div className="w-10 h-10 bg-white/50 rounded-full flex items-center justify-center text-gray-400 mb-2 shadow-sm">
+              <Calendar size={20} />
+            </div>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">暂无关键日程</p>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-[#F7F8FA]">
@@ -525,10 +721,10 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
             {/* Left Column - Main Profile */}
             <div className="col-span-8 space-y-6">
               {/* Profile Header Card */}
-              <div className="bg-white rounded-2xl border border-gray-100 p-8 shadow-sm">
+              <div className="glass rounded-3xl border border-white/50 p-8 shadow-sm">
                 <div className="flex items-start justify-between mb-8">
                   <div className="flex items-center space-x-6">
-                    <div className="w-20 h-20 bg-gray-900 rounded-full flex items-center justify-center text-white text-3xl font-bold overflow-hidden relative group cursor-pointer" onClick={() => setActiveModal('avatar')}>
+                    <div className="w-20 h-20 bg-gray-900 rounded-full flex items-center justify-center text-white text-3xl font-bold overflow-hidden relative group cursor-pointer shadow-md" onClick={() => { setAvatarUrlInput(client.avatarUrl || ''); setActiveModal('avatar'); }}>
                       <img 
                         src={client.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`} 
                         alt="avatar" 
@@ -540,48 +736,48 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
                     </div>
                     <div>
                       <div className="flex items-center space-x-3 mb-1">
-                        <h2 className="text-2xl font-bold text-gray-900">{client.name}</h2>
+                        <h2 className="text-2xl font-bold text-gray-900 tracking-tight">{client.name}</h2>
                         <button 
                           onClick={() => {
                             setBasicInfoForm({ name: client.name, advisor: client.advisor || '', gpa: client.gpa || '' });
                             setActiveModal('basicInfo');
                           }}
-                          className="text-gray-300 hover:text-gray-600 transition-colors"
+                          className="text-gray-300 hover:text-blue-500 transition-colors"
                         >
                           <Edit2 size={16} />
                         </button>
                       </div>
                       <div className="flex items-center space-x-4">
-                        <span className="text-xs text-gray-400 flex items-center">
-                          <UserCheck size={12} className="mr-1 text-cyan-500" />
-                          择导老师: <span className="text-cyan-600 font-bold ml-1">{client.advisor || '未分配'}</span>
+                        <span className="text-xs text-gray-500 flex items-center font-medium">
+                          <UserCheck size={12} className="mr-1 text-blue-500" />
+                          择导老师: <span className="text-blue-600 font-bold ml-1">{client.advisor || '未分配'}</span>
                         </span>
                         <span className="text-xs text-gray-300">|</span>
-                        <span className="text-xs text-gray-400">状态: <span className={client.status === 'archived' ? "text-gray-500 font-bold" : "text-emerald-500 font-bold"}>{client.status === 'archived' ? '已归档' : '服务中'}</span></span>
+                        <span className="text-xs text-gray-500 font-medium">状态: <span className={client.status === 'archived' ? "text-gray-400 font-bold" : "text-emerald-500 font-bold"}>{client.status === 'archived' ? '已归档' : '服务中'}</span></span>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="bg-cyan-50/50 rounded-xl p-4 border border-cyan-100/50">
+                  <div className="bg-white/40 backdrop-blur-sm rounded-2xl p-4 border border-white/50 shadow-sm">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-bold text-cyan-600 uppercase tracking-wider">GPA</span>
-                      <GraduationCap size={14} className="text-cyan-400" />
+                      <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">GPA</span>
+                      <GraduationCap size={14} className="text-blue-400" />
                     </div>
                     <div className="text-xl font-bold text-gray-900">{client.gpa || '-'}</div>
                   </div>
-                  <div className="bg-purple-50/50 rounded-xl p-4 border border-purple-100/50">
+                  <div className="bg-white/40 backdrop-blur-sm rounded-2xl p-4 border border-white/50 shadow-sm">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider">教育经历</span>
-                      <BookOpen size={14} className="text-purple-400" />
+                      <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">教育经历</span>
+                      <BookOpen size={14} className="text-indigo-400" />
                     </div>
                     <div className="text-xl font-bold text-gray-900">{client.educations?.length || 0}</div>
                   </div>
-                  <div className="bg-amber-50/50 rounded-xl p-4 border border-amber-100/50">
+                  <div className="bg-white/40 backdrop-blur-sm rounded-2xl p-4 border border-white/50 shadow-sm">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">文书</span>
-                      <FileText size={14} className="text-amber-400" />
+                      <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider">文书</span>
+                      <FileText size={14} className="text-purple-400" />
                     </div>
                     <div className="text-xl font-bold text-gray-900">{client.documents?.length || 0}</div>
                   </div>
@@ -660,9 +856,12 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
                   </InfoCard>
                 </div>
 
+                {/* Timeline Card */}
+                {renderTimeline()}
+
                 <InfoCard 
                   icon={BookOpen} 
-                  title="教育经历" 
+                  title="教育经历"  
                   onAdd={() => setActiveModal('education')}
                   items={client.educations}
                   renderItem={(edu) => (
@@ -1039,6 +1238,79 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
         </div>
       </Modal>
 
+      <Modal isOpen={activeModal === 'event'} onClose={() => setActiveModal(null)} onConfirm={handleSaveEvent} title={eventForm.id ? "编辑事件" : "添加事件"}>
+        <div className="space-y-4">
+          <InputField 
+            label="事件标题 (必填)" 
+            placeholder="例如: 帝国理工 DDL" 
+            value={eventForm.title}
+            onChange={val => setEventForm({ ...eventForm, title: val })}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <InputField 
+              label="日期 (必填)" 
+              type="date" 
+              value={eventForm.date}
+              onChange={val => setEventForm({ ...eventForm, date: val })}
+            />
+            <InputField 
+              label="时间 (可选)" 
+              type="time" 
+              value={eventForm.time}
+              onChange={val => setEventForm({ ...eventForm, time: val })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider ml-1">事件类型</label>
+            <div className="relative">
+              <select 
+                value={eventForm.type}
+                onChange={e => setEventForm({ ...eventForm, type: e.target.value as any })}
+                className="w-full appearance-none bg-gray-50 border-none rounded-xl px-4 py-3 text-sm text-gray-700 focus:ring-2 focus:ring-cyan-500 transition-all cursor-pointer"
+              >
+                <option value="deadline">截止日期 (Deadline)</option>
+                <option value="interview">面试 (Interview)</option>
+                <option value="submission">材料提交 (Submission)</option>
+                <option value="meeting">会议/沟通 (Meeting)</option>
+                <option value="reminder">提醒 (Reminder)</option>
+                <option value="other">其他 (Other)</option>
+              </select>
+              <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider ml-1">优先级</label>
+            <div className="flex space-x-2">
+              <button 
+                onClick={() => setEventForm({ ...eventForm, priority: 'high' })}
+                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${eventForm.priority === 'high' ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}
+              >
+                高
+              </button>
+              <button 
+                onClick={() => setEventForm({ ...eventForm, priority: 'medium' })}
+                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${eventForm.priority === 'medium' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}
+              >
+                中
+              </button>
+              <button 
+                onClick={() => setEventForm({ ...eventForm, priority: 'low' })}
+                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${eventForm.priority === 'low' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}
+              >
+                低
+              </button>
+            </div>
+          </div>
+          <InputField 
+            label="备注 (可选)" 
+            type="textarea"
+            placeholder="请输入备注信息" 
+            value={eventForm.description}
+            onChange={val => setEventForm({ ...eventForm, description: val })}
+          />
+        </div>
+      </Modal>
+
       <Modal isOpen={activeModal === 'education'} onClose={() => setActiveModal(null)} onConfirm={handleAddEducation} title="添加教育经历">
         <div className="space-y-4">
           <InputField 
@@ -1235,17 +1507,27 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
       <Modal isOpen={activeModal === 'avatar'} onClose={() => setActiveModal(null)} onConfirm={handleUpdateAvatar} title="修改头像">
         <div className="space-y-4">
           <div className="flex justify-center mb-4">
-            <div className="w-24 h-24 rounded-full bg-gray-100 border-4 border-white shadow-lg overflow-hidden">
+            <div className="relative group cursor-pointer w-24 h-24 rounded-full bg-gray-100 border-4 border-white shadow-lg overflow-hidden transition-transform hover:scale-105" onClick={() => avatarInputRef.current?.click()}>
               <img 
                 src={avatarUrlInput || client.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`} 
                 alt="preview" 
                 className="w-full h-full object-cover"
               />
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <Upload size={24} className="text-white" />
+              </div>
             </div>
+            <input 
+              type="file" 
+              ref={avatarInputRef}
+              onChange={handleAvatarUpload}
+              className="hidden"
+              accept="image/*"
+            />
           </div>
           <InputField 
             label="头像 URL" 
-            placeholder="请输入图片 URL (支持 http/https)" 
+            placeholder="请输入图片 URL (支持 http/https) 或点击上方上传" 
             value={avatarUrlInput}
             onChange={val => setAvatarUrlInput(val)}
           />

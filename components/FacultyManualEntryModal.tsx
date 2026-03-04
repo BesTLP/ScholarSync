@@ -90,19 +90,19 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-xl" onClick={onClose} />
+      <div className="relative glass w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 border border-white/50">
         
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h3 className="text-lg font-bold text-gray-900">手动录入导师信息</h3>
-          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/50 bg-white/40 backdrop-blur-sm">
+          <h3 className="text-lg font-bold text-gray-900 tracking-tight">手动录入导师信息</h3>
+          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/60 rounded-xl transition-all active:scale-95">
             <X size={20} />
           </button>
         </div>
 
         {/* Form Content */}
-        <div className="p-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
+        <div className="p-8 max-h-[70vh] overflow-y-auto custom-scrollbar bg-white/20 backdrop-blur-sm">
           <div className="grid grid-cols-2 gap-6">
             <InputField 
               label="姓名" 
@@ -184,16 +184,16 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-white border-t border-gray-100 flex justify-end space-x-3">
+        <div className="px-6 py-4 bg-white/40 backdrop-blur-sm border-t border-white/50 flex justify-end space-x-3">
           <button 
             onClick={onClose}
-            className="px-6 py-2.5 text-gray-500 font-bold text-sm hover:bg-gray-50 rounded-xl transition-colors"
+            className="px-6 py-2.5 text-gray-600 font-bold text-sm hover:bg-white/60 rounded-xl transition-all active:scale-95"
           >
             取消
           </button>
           <button 
             onClick={handleSave}
-            className="px-6 py-2.5 bg-cyan-500 text-white rounded-xl text-sm font-bold hover:bg-cyan-600 transition-all shadow-lg shadow-cyan-100 active:scale-95 flex items-center"
+            className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-sm font-bold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md shadow-blue-500/20 active:scale-95 flex items-center"
           >
             <Save size={18} className="mr-2" />
             保存导师信息
