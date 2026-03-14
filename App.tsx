@@ -192,6 +192,135 @@ function App() {
   };
 
   // Faculty Database Operations
+  const batchAddFacultyToDatabase = (items: { faculty: FacultyMember, country?: string, fieldCategory?: string, extra?: Partial<FacultyRecord> }[]) => {
+    setFacultyDatabase(prev => {
+      const newDatabase = [...prev];
+      const addedIds: string[] = [];
+
+      items.forEach(({ faculty, country: manualCountry, fieldCategory: manualField, extra }) => {
+        const existing = newDatabase.find(f => 
+          f.name.toLowerCase() === faculty.name.toLowerCase() && 
+          f.university.toLowerCase() === faculty.university.toLowerCase()
+        );
+
+        // Unified Classifier Logic (re-implementing inside to avoid stale scope if needed, 
+        // but here we can just use a helper or the one defined in the component if it doesn't use state)
+        const classify = (f: FacultyMember, mCountry?: string, mField?: string) => {
+          let normalizedManualCountry = mCountry;
+          let manualSubRegion = "";
+          if (mCountry) {
+            const mcLower = mCountry.toLowerCase();
+            if (mcLower.includes('china') || mcLower.includes('中国')) {
+              normalizedManualCountry = '中国';
+              if (mcLower.includes('beijing') || mcLower.includes('北京')) manualSubRegion = '北京';
+              else if (mcLower.includes('shanghai') || mcLower.includes('上海')) manualSubRegion = '上海';
+              else if (mcLower.includes('hangzhou') || mcLower.includes('杭州')) manualSubRegion = '杭州';
+              else if (mcLower.includes('xi\'an') || mcLower.includes('xian') || mcLower.includes('西安')) manualSubRegion = '西安';
+              else if (mcLower.includes('hong kong') || mcLower.includes('香港')) manualSubRegion = '香港';
+            }
+          }
+
+          let country = normalizedManualCountry || f.matchReasoning?.locationCheck || "";
+          let subRegion = manualSubRegion || "";
+          let regionPath: string[] = [];
+          if (country === '中国') {
+            regionPath = ['中国', subRegion || '其他'];
+          } else if (country) {
+            regionPath = [country];
+          }
+
+          let fieldCategory = mField || "";
+          let subFieldCategory = "";
+          let path: string[] = [];
+
+          if (!fieldCategory) {
+            const fieldContext = (f.department + " " + (f.researchAreas?.join(" ") || "")).toLowerCase();
+            if (fieldContext.includes('computer') || fieldContext.includes('software') || fieldContext.includes('ai') || fieldContext.includes('intelligence') || fieldContext.includes('data')) {
+              fieldCategory = "计算机科学";
+              if (fieldContext.includes('ai') || fieldContext.includes('intelligence') || fieldContext.includes('machine learning')) {
+                subFieldCategory = "人工智能";
+                path = ["工程与技术", "计算机科学", "人工智能"];
+              } else if (fieldContext.includes('security') || fieldContext.includes('cryptography')) {
+                subFieldCategory = "网络安全";
+                path = ["工程与技术", "计算机科学", "网络安全"];
+              } else if (fieldContext.includes('data') || fieldContext.includes('analytics') || fieldContext.includes('mining')) {
+                subFieldCategory = "数据科学";
+                path = ["工程与技术", "计算机科学", "数据科学"];
+              } else {
+                subFieldCategory = "通用计算机";
+                path = ["工程与技术", "计算机科学"];
+              }
+            } else if (fieldContext.includes('mechanical') || fieldContext.includes('robotics') || fieldContext.includes('mechatronics') || fieldContext.includes('automation') || fieldContext.includes('control')) {
+              fieldCategory = "机械工程";
+              subFieldCategory = fieldContext.includes('robot') ? "机器人学" : "通用机械";
+              path = ["工程与技术", "机械工程"];
+            } else if (fieldContext.includes('finance') || fieldContext.includes('economics') || fieldContext.includes('accounting') || fieldContext.includes('business') || fieldContext.includes('management')) {
+              fieldCategory = "商科与经济";
+              if (fieldContext.includes('finance')) {
+                subFieldCategory = "金融学";
+                path = ["社会科学", "商科与经济", "金融学"];
+              } else if (fieldContext.includes('economics')) {
+                subFieldCategory = "经济学";
+                path = ["社会科学", "商科与经济", "经济学"];
+              } else {
+                subFieldCategory = "工商管理";
+                path = ["社会科学", "商科与经济", "工商管理"];
+              }
+            } else if (fieldContext.includes('biology') || fieldContext.includes('bio') || fieldContext.includes('genetics') || fieldContext.includes('medical') || fieldContext.includes('health')) {
+              fieldCategory = "生物与医学";
+              subFieldCategory = fieldContext.includes('medical') ? "临床医学" : "生物科学";
+              path = ["生命科学", "生物与医学"];
+            } else if (f.department) {
+              fieldCategory = f.department;
+              path = [f.department];
+            }
+          } else {
+            path = [fieldCategory];
+          }
+
+          return { country, subRegion, regionPath, fieldCategory, subFieldCategory, classificationPath: path };
+        };
+
+        const classification = classify(faculty, manualCountry, manualField);
+        const finalClassification = { ...classification, ...extra };
+
+        if (existing) {
+          const isManual = existing.classificationSource === 'manual' || existing.classificationSource === 'hybrid' || extra?.classificationSource === 'manual';
+          const updatedIdx = newDatabase.findIndex(f => f.id === existing.id);
+          newDatabase[updatedIdx] = {
+            ...existing,
+            ...faculty,
+            country: isManual ? (extra?.country || existing.country) : classification.country,
+            fieldCategory: isManual ? (extra?.fieldCategory || existing.fieldCategory) : classification.fieldCategory,
+            subFieldCategory: isManual ? (extra?.subFieldCategory || existing.subFieldCategory) : classification.subFieldCategory,
+            classificationPath: isManual ? (extra?.classificationPath || existing.classificationPath) : classification.classificationPath,
+            classificationNote: extra?.classificationNote || existing.classificationNote,
+            classificationSource: extra?.classificationSource || (isManual ? 'hybrid' : 'auto'),
+            updatedAt: new Date().toISOString(),
+            source: 'search'
+          };
+          addedIds.push(existing.id);
+        } else {
+          const newId = crypto.randomUUID();
+          const newRecord: FacultyRecord = {
+            ...faculty,
+            id: newId,
+            ...finalClassification,
+            classificationSource: extra?.classificationSource || 'auto',
+            addedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            source: 'search',
+            linkedClientIds: []
+          };
+          newDatabase.push(newRecord);
+          addedIds.push(newId);
+        }
+      });
+
+      return newDatabase;
+    });
+  };
+
   const addFacultyToDatabase = (faculty: FacultyMember, manualCountry?: string, manualField?: string, extra?: Partial<FacultyRecord>): string => {
     // Check for duplicates (Name + University)
     const existing = facultyDatabase.find(f => 
@@ -385,8 +514,14 @@ function App() {
   };
 
   const updateFacultyRecord = (id: string, updates: Partial<FacultyRecord>) => {
-    setFacultyDatabase(facultyDatabase.map(f => 
+    setFacultyDatabase(prev => prev.map(f => 
       f.id === id ? { ...f, ...updates, updatedAt: new Date().toISOString() } : f
+    ));
+  };
+
+  const batchUpdateFacultyRecords = (ids: string[], updates: Partial<FacultyRecord>) => {
+    setFacultyDatabase(prev => prev.map(f => 
+      ids.includes(f.id) ? { ...f, ...updates, updatedAt: new Date().toISOString() } : f
     ));
   };
 
@@ -647,7 +782,9 @@ function App() {
             facultyDatabase={facultyDatabase}
             clients={clients}
             onAddFaculty={addFacultyToDatabase}
+            onBatchAddFaculty={batchAddFacultyToDatabase}
             onUpdateFaculty={updateFacultyRecord}
+            onBatchUpdateFaculty={batchUpdateFacultyRecords}
             onDeleteFaculty={deleteFacultyRecord}
             onLinkFaculty={linkFacultyToClient}
             onUnlinkFaculty={unlinkFacultyFromClient}

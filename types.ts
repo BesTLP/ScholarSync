@@ -17,29 +17,34 @@ export interface SourceData {
 export interface FacultyMember {
   name: string;
   title: string;
-  university: string;         // New: University Name
-  department?: string;        // New: Department
+  university: string;         // 学校名称 (中)
+  universityEn?: string;       // 学校名称 (英)
+  department?: string;        // 院系
+  programName?: string;       // 专业名称 (中)
+  programNameEn?: string;     // 专业名称 (英)
   matchScore: number;
-  researchAreas: string[];
+  researchAreas: string[];    // 导师研究方向
   alignmentDetails: string;
-  activitySummary: string;    // New: High-level summary of activities
-  recentActivities: string[]; // Specific, dated events
+  activitySummary: string;    
+  recentActivities: string[]; // 导师研究方向 (论文/项目)
   isActive: boolean;
-  profileUrl?: string;
-  photoUrl?: string;          // New: Profile photo URL
-  email?: string;             // New: Contact email
+  profileUrl?: string;        // 导师官网链接
+  photoUrl?: string;          
+  email?: string;             // 导师邮箱
   
   // Admission & Data Fields with Source
-  qsRanking?: string;         // Kept for UI display, preferably short e.g. "QS #10"
+  qsRanking?: string;         // 2026QS综合排名
   qsRankingData?: SourceData;
-  deadlineData?: SourceData;
-  applicationReqsData?: SourceData;
-  rpReqsData?: SourceData;
-  tuitionData?: SourceData;
-  scholarshipData?: SourceData;
+  deadlineData?: SourceData;  // 申请截止日期
+  applicationReqsData?: SourceData; // 申请要求及材料
+  rpReqsData?: SourceData;    // RP字数要求
+  tuitionData?: SourceData;   // 学费
+  scholarshipData?: SourceData; // 奖学金项目
   
-  programUrl?: string;        // "链接"
-  universityUrl?: string;     // "官网"
+  programUrl?: string;        // 专业链接
+  universityUrl?: string;     // 学校官网
+  
+  recommendationReason?: string; // 推荐理由
 
   matchReasoning: MatchReasoning;
 }

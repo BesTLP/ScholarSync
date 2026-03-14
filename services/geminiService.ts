@@ -5,10 +5,10 @@ import { FacultyMember, ImageSize, TargetOption, Client } from "../types";
 // Initialize the client
 const getClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const MODEL_FACULTY_MATCHER = 'gemini-3-pro-preview';
-const MODEL_IMAGE_GEN = 'gemini-3-pro-image-preview';
-const MODEL_CHAT = 'gemini-3-pro-preview';
-const MODEL_FAST = 'gemini-flash-lite-latest'; // Use Flash Lite for fast text parsing
+const MODEL_FACULTY_MATCHER = 'gemini-3.1-pro-preview';
+const MODEL_IMAGE_GEN = 'gemini-3.1-flash-image-preview';
+const MODEL_CHAT = 'gemini-3.1-pro-preview';
+const MODEL_FAST = 'gemini-3-flash-preview'; // Use Flash for fast text parsing
 
 interface MatchParams {
   studentProfile: string;
@@ -284,7 +284,8 @@ export const generateFacultyMatchesDecomposed = async (
         // 同一人在多个维度出现——加分！说明是交叉型学者
         const existing = seen.get(key)!;
         existing.dimensionTags.push(dr.dimension);
-        existing.matchScore = Math.min(100, existing.matchScore + 10); // 每多覆盖一个维度加10分
+        const currentScore = existing.matchScore ?? 0;
+        existing.matchScore = Math.min(100, currentScore + 10); // 每多覆盖一个维度加10分
       } else {
         seen.set(key, { 
           ...prof, 
@@ -302,7 +303,9 @@ export const generateFacultyMatchesDecomposed = async (
       if (b.dimensionTags.length !== a.dimensionTags.length) {
         return b.dimensionTags.length - a.dimensionTags.length; // 覆盖维度多的排前面
       }
-      return b.matchScore - a.matchScore;
+      const scoreA = a.matchScore ?? 0;
+      const scoreB = b.matchScore ?? 0;
+      return scoreB - scoreA;
     });
 
   return {
@@ -430,9 +433,13 @@ ${isInterdisciplinary ? `
 
     **OUTPUT RULES**:
     - **QS Ranking**: Include current QS World Ranking (e.g., "QS 2025: #15").
+    - **University Names**: Provide both Chinese and English names.
+    - **Program Info**: Provide both Chinese and English program names.
+    - **Admission Data**: For deadlines, requirements, RP word count, tuition, and scholarships, you MUST provide the value AND the source URL where you found it.
     - **Email**: Must be the official academic email.
     - **Research Areas**: Format as "English Term (中文翻译)".
     - **Match Reasoning**: Chinese, concise, verified.
+    - **Recommendation Reason**: Provide a 1-2 sentence recommendation reason in Chinese.
     - **Language**: Simplified Chinese.
 
     **RECENT ACADEMIC ACTIVITIES (${currentYear - 5}-${currentYear}) - DETAILED PAPERS & PROJECTS**:
@@ -469,7 +476,11 @@ ${isInterdisciplinary ? `
       properties: {
         name: { type: Type.STRING },
         title: { type: Type.STRING },
-        university: { type: Type.STRING, description: "Full Name of University (EN & CN)" },
+        university: { type: Type.STRING, description: "Full Name of University (CN)" },
+        universityEn: { type: Type.STRING, description: "Full Name of University (EN)" },
+        department: { type: Type.STRING, description: "Department Name" },
+        programName: { type: Type.STRING, description: "Program Name (CN)" },
+        programNameEn: { type: Type.STRING, description: "Program Name (EN)" },
         matchScore: { type: Type.INTEGER },
         researchAreas: { type: Type.ARRAY, items: { type: Type.STRING, description: "Research areas: English (Chinese)" } },
         alignmentDetails: { type: Type.STRING },
@@ -480,6 +491,33 @@ ${isInterdisciplinary ? `
         photoUrl: { type: Type.STRING, description: "URL to the professor's profile photo" },
         email: { type: Type.STRING },
         qsRanking: { type: Type.STRING },
+        qsRankingData: {
+          type: Type.OBJECT,
+          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+        },
+        deadlineData: {
+          type: Type.OBJECT,
+          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+        },
+        applicationReqsData: {
+          type: Type.OBJECT,
+          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+        },
+        rpReqsData: {
+          type: Type.OBJECT,
+          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+        },
+        tuitionData: {
+          type: Type.OBJECT,
+          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+        },
+        scholarshipData: {
+          type: Type.OBJECT,
+          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+        },
+        programUrl: { type: Type.STRING },
+        universityUrl: { type: Type.STRING },
+        recommendationReason: { type: Type.STRING },
         matchReasoning: {
           type: Type.OBJECT,
           properties: {
@@ -1209,6 +1247,186 @@ export const searchUniversityInfo = async (university: string, department?: stri
     return JSON.parse(text);
   } catch (error) {
     console.error("University search failed:", error);
+    return null;
+  }
+};
+
+export const processImportedFacultyBatch = async (rows: any[]): Promise<{ faculty: FacultyMember, country: string, fieldCategory: string }[]> => {
+  const ai = getClient();
+  
+  // Clean rows to avoid sending excessively large data
+  const cleanedRows = rows.map(row => {
+    const cleaned: any = {};
+    for (const key in row) {
+      const val = row[key];
+      if (typeof val === 'string') {
+        // Truncate very long strings to keep prompt size reasonable
+        cleaned[key] = val.length > 1000 ? val.substring(0, 1000) + "..." : val;
+      } else {
+        cleaned[key] = val;
+      }
+    }
+    return cleaned;
+  });
+
+  const prompt = `
+    Task: You are an expert academic data processor. You have received a batch of raw data rows from an Excel/CSV file representing faculty members.
+    Your job is to extract, clean, and structure this data into a list of valid FacultyMember objects, along with their Country and Field Category.
+    
+    Batch Data (JSON Array):
+    ${JSON.stringify(cleanedRows)}
+    
+    Instructions:
+    1. For each row, extract the professor's Name, University (Chinese and English), and Title.
+    2. Extract Program Name (Chinese and English), QS Ranking, Application Deadline, Program URL, University URL, Tuition, and Scholarship Info.
+    3. Extract Application Requirements, RP (Research Proposal) Requirements, Research Areas/Papers, and Recommendation Reason.
+    4. Extract Department, Email, and Profile URL.
+    5. Determine the Country/Region of the University (e.g., "美国", "英国", "中国", "澳洲", "加拿大", "新加坡", etc.).
+    6. Determine the broad Field Category (e.g., "计算机科学", "机械工程", "商科与经济", "生物与医学", etc.) based on their research or department.
+    7. If a row is missing Name or University, try to infer them from context if possible, otherwise skip.
+    8. All missing information can be left as empty strings or nulls; do not hallucinate.
+    9. Return an array of objects matching the schema below.
+    
+    Output Schema (JSON Array of Objects):
+    [{
+      "faculty": {
+        "name": "String",
+        "title": "String",
+        "university": "String",
+        "universityEn": "String",
+        "department": "String",
+        "programName": "String",
+        "programNameEn": "String",
+        "matchScore": 0,
+        "researchAreas": ["Area 1", "Area 2"],
+        "alignmentDetails": "String",
+        "activitySummary": "",
+        "recentActivities": [],
+        "isActive": true,
+        "profileUrl": "String",
+        "photoUrl": "String",
+        "email": "String",
+        "qsRanking": "String",
+        "qsRankingData": { "value": "String", "sourceUrl": "" },
+        "deadlineData": { "value": "String", "sourceUrl": "" },
+        "applicationReqsData": { "value": "String", "sourceUrl": "" },
+        "rpReqsData": { "value": "String", "sourceUrl": "" },
+        "tuitionData": { "value": "String", "sourceUrl": "" },
+        "scholarshipData": { "value": "String", "sourceUrl": "" },
+        "programUrl": "String",
+        "universityUrl": "String",
+        "recommendationReason": "String",
+        "matchReasoning": {
+          "locationCheck": "",
+          "universityCheck": "",
+          "departmentCheck": "",
+          "researchFit": "",
+          "positionCheck": "",
+          "activityCheck": "",
+          "reputationCheck": ""
+        }
+      },
+      "country": "String",
+      "fieldCategory": "String"
+    }]
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL_FAST,
+      contents: prompt,
+      config: { responseMimeType: "application/json" }
+    });
+    
+    const text = response.text;
+    if (!text) return [];
+    
+    const result = JSON.parse(text);
+    if (!Array.isArray(result)) return [];
+    
+    return result.filter(item => item.faculty && item.faculty.name && item.faculty.university);
+  } catch (error) {
+    console.error("Failed to process imported batch:", error);
+    throw error; // Rethrow to trigger fallback in UI
+  }
+};
+
+export const processImportedFacultyRow = async (rawRow: any): Promise<{ faculty: FacultyMember, country: string, fieldCategory: string } | null> => {
+  const ai = getClient();
+  const prompt = `
+    Task: You are an expert academic data processor. You have received a raw row of data from an Excel/CSV file representing a faculty member.
+    Your job is to extract, clean, and structure this data into a valid FacultyMember object, along with their Country and Field Category.
+    
+    Raw Row Data (JSON):
+    ${JSON.stringify(rawRow)}
+    
+    Instructions:
+    1. Extract the professor's Name, University, and Title. These are REQUIRED. If Name or University is completely missing and cannot be inferred, return null (by returning an empty object or throwing, but preferably just do your best to extract).
+    2. Extract Department, Research Areas (as an array of strings), Email, Profile URL.
+    3. Determine the Country/Region of the University (e.g., "美国", "英国", "中国", "澳洲", "加拿大", "新加坡", etc.).
+    4. Determine the broad Field Category (e.g., "计算机科学", "机械工程", "商科与经济", "生物与医学", etc.) based on their research or department.
+    5. Ensure all fields match the required schema.
+    
+    Output Schema (JSON):
+    {
+      "faculty": {
+        "name": "String",
+        "title": "String",
+        "university": "String",
+        "universityEn": "String",
+        "department": "String",
+        "programName": "String",
+        "programNameEn": "String",
+        "matchScore": 0,
+        "researchAreas": ["Area 1", "Area 2"],
+        "alignmentDetails": "String (Summary of their work)",
+        "activitySummary": "String",
+        "recentActivities": ["Activity 1", "Activity 2"],
+        "isActive": true,
+        "profileUrl": "String",
+        "photoUrl": "String",
+        "email": "String",
+        "qsRanking": "String",
+        "qsRankingData": { "value": "String", "sourceUrl": "String" },
+        "deadlineData": { "value": "String", "sourceUrl": "String" },
+        "applicationReqsData": { "value": "String", "sourceUrl": "String" },
+        "rpReqsData": { "value": "String", "sourceUrl": "String" },
+        "tuitionData": { "value": "String", "sourceUrl": "String" },
+        "scholarshipData": { "value": "String", "sourceUrl": "String" },
+        "programUrl": "String",
+        "universityUrl": "String",
+        "recommendationReason": "String",
+        "matchReasoning": {
+          "locationCheck": "",
+          "universityCheck": "",
+          "departmentCheck": "",
+          "researchFit": "",
+          "positionCheck": "",
+          "activityCheck": "",
+          "reputationCheck": ""
+        }
+      },
+      "country": "String (e.g., 美国)",
+      "fieldCategory": "String (e.g., 计算机科学)"
+    }
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL_FAST,
+      contents: prompt,
+      config: { responseMimeType: "application/json" }
+    });
+    
+    const text = response.text;
+    if (!text) return null;
+    
+    const result = JSON.parse(text);
+    if (!result.faculty || !result.faculty.name || !result.faculty.university) return null;
+    
+    return result;
+  } catch (error) {
+    console.error("Failed to process imported row:", error);
     return null;
   }
 };

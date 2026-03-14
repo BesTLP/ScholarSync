@@ -19,7 +19,9 @@ import {
   MoreHorizontal,
   Loader2,
   Search,
-  ChevronRight
+  ChevronRight,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface FacultyCardProps {
@@ -79,6 +81,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
   };
 
   const [imgError, setImgError] = React.useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const [admissionData, setAdmissionData] = useState<any>(null);
   const [loadingAdmission, setLoadingAdmission] = useState(false);
@@ -101,7 +104,10 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
   if (!prof) return null;
 
   return (
-    <div className="glass p-8 md:p-10 rounded-[40px] shadow-sm hover:shadow-xl transition-all duration-500 group relative overflow-hidden hover:scale-[1.01] border border-white/50">
+    <div 
+        onClick={() => setIsExpanded(!isExpanded)}
+        className={`glass p-8 md:p-10 rounded-[40px] shadow-sm hover:shadow-xl transition-all duration-500 group relative overflow-hidden border border-white/50 cursor-pointer ${!isExpanded ? 'hover:scale-[1.01]' : ''}`}
+    >
         {/* Decorative Background Element */}
         <div className="absolute -top-24 -right-24 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl group-hover:bg-blue-500/10 transition-colors duration-500"></div>
         
@@ -118,21 +124,21 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
             {isDatabaseView && record ? (
                 <>
                     <button 
-                        onClick={() => onEdit?.(record)}
+                        onClick={(e) => { e.stopPropagation(); onEdit?.(record); }}
                         className="p-2.5 bg-white/60 backdrop-blur-sm text-gray-500 hover:text-blue-600 rounded-xl border border-white/50 shadow-sm hover:shadow-md transition-all active:scale-95"
                         title="编辑导师信息"
                     >
                         <Pencil size={16} />
                     </button>
                     <button 
-                        onClick={() => onRefresh?.(record)}
+                        onClick={(e) => { e.stopPropagation(); onRefresh?.(record); }}
                         className="p-2.5 bg-white/60 backdrop-blur-sm text-gray-500 hover:text-emerald-600 rounded-xl border border-white/50 shadow-sm hover:shadow-md transition-all active:scale-95"
                         title="联网更新数据"
                     >
                         <RefreshCw size={16} />
                     </button>
                     <button 
-                        onClick={() => onDelete?.(record.id)}
+                        onClick={(e) => { e.stopPropagation(); onDelete?.(record.id); }}
                         className="p-2.5 bg-white/60 backdrop-blur-sm text-gray-500 hover:text-red-600 rounded-xl border border-white/50 shadow-sm hover:shadow-md transition-all active:scale-95"
                         title="删除导师"
                     >
@@ -143,7 +149,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                 <>
                     {onSave && (
                         <button 
-                            onClick={() => onSave(prof)}
+                            onClick={(e) => { e.stopPropagation(); onSave(prof); }}
                             className={`p-2.5 rounded-xl border backdrop-blur-sm shadow-sm hover:shadow-md transition-all active:scale-95 ${isSaved ? 'bg-amber-500 text-white border-amber-400' : 'bg-white/60 text-gray-400 hover:text-amber-500 border-white/50'}`}
                             title={isSaved ? "已收藏" : "收藏到导师库"}
                         >
@@ -155,7 +161,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
             
             {onLink && (
                 <button 
-                    onClick={() => onLink(prof)}
+                    onClick={(e) => { e.stopPropagation(); onLink(prof); }}
                     className={`p-2.5 rounded-xl border backdrop-blur-sm shadow-sm hover:shadow-md transition-all active:scale-95 ${isLinked ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-transparent shadow-blue-500/20' : 'bg-white/60 text-gray-400 hover:text-blue-600 border-white/50'}`}
                     title="推荐给学生"
                 >
@@ -165,7 +171,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
 
             {onUnlink && (
                  <button 
-                    onClick={() => onUnlink((prof as FacultyRecord).id)}
+                    onClick={(e) => { e.stopPropagation(); onUnlink((prof as FacultyRecord).id); }}
                     className="p-2.5 bg-white/60 backdrop-blur-sm text-gray-500 hover:text-red-600 rounded-xl border border-white/50 shadow-sm hover:shadow-md transition-all active:scale-95"
                     title="移除关联"
                 >
@@ -238,14 +244,14 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                             <div className="w-1 h-1 rounded-full bg-gray-300"></div>
                             <p className="text-sm text-gray-900 font-extrabold flex items-center gap-2">
                                 <School size={16} className="text-indigo-500/50" />
-                                {prof.university}
+                                {prof.university} {prof.universityEn ? `(${prof.universityEn})` : ''}
                             </p>
-                            {prof.department && (
+                            {(prof.department || prof.programName) && (
                                 <>
                                     <div className="w-1 h-1 rounded-full bg-gray-300"></div>
                                     <p className="text-sm text-gray-600 font-bold flex items-center gap-2">
                                         <Building2 size={16} className="text-purple-500/50" />
-                                        {prof.department}
+                                        {prof.programName || prof.department}
                                     </p>
                                 </>
                             )}
@@ -254,6 +260,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                             {prof.email && prof.email.trim() !== '' && (
                                 <a 
                                     href={`mailto:${prof.email}`}
+                                    onClick={(e) => e.stopPropagation()}
                                     className="text-xs text-gray-500 hover:text-blue-600 flex items-center gap-2 font-medium transition-colors"
                                 >
                                     <Mail size={14} className="text-blue-400" />
@@ -265,6 +272,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                                     href={prof.profileUrl} 
                                     target="_blank" 
                                     rel="noopener noreferrer" 
+                                    onClick={(e) => e.stopPropagation()}
                                     className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-2 font-medium transition-colors"
                                 >
                                     <ExternalLink size={14} />
@@ -292,8 +300,31 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
             </div>
         </div>
         
-        {/* Research Areas Tags */}
-        <div className="mb-8">
+        {/* Expand/Collapse Toggle */}
+        <div className="mt-4 flex justify-center">
+            <button 
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="flex items-center gap-2 px-6 py-2 bg-gray-50 hover:bg-gray-100 text-gray-500 text-xs font-black uppercase tracking-widest rounded-2xl border border-gray-100 transition-all active:scale-95"
+            >
+                {isExpanded ? (
+                    <>
+                        <ChevronUp size={14} />
+                        收起详情
+                    </>
+                ) : (
+                    <>
+                        <ChevronDown size={14} />
+                        查看详情
+                    </>
+                )}
+            </button>
+        </div>
+
+        {/* Detailed Content (Expandable) */}
+        {isExpanded && (
+            <div className="mt-10 animate-in fade-in slide-in-from-top-4 duration-500">
+                {/* Research Areas Tags */}
+                <div className="mb-8">
                 <div className="flex flex-wrap gap-2.5">
                 {prof.researchAreas.map((area, i) => (
                     <span key={i} className="px-4 py-2 bg-gray-100/50 backdrop-blur-sm text-gray-600 text-[11px] font-bold rounded-xl border border-gray-200/50 hover:bg-white hover:shadow-md transition-all cursor-default">
@@ -302,6 +333,19 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                 ))}
                 </div>
         </div>
+
+        {/* Recommendation Reason */}
+        {prof.recommendationReason && (
+            <div className="mb-6 bg-emerald-50/30 border-l-4 border-emerald-500 p-6 rounded-r-3xl backdrop-blur-sm">
+                <h6 className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em] mb-3 flex items-center gap-2">
+                    <Star size={14} className="fill-emerald-500" />
+                    推荐理由
+                </h6>
+                <p className="text-sm text-gray-800 leading-relaxed font-bold italic">
+                    "{prof.recommendationReason}"
+                </p>
+            </div>
+        )}
 
         {/* Alignment Details / Match Reason */}
         {prof.alignmentDetails && (
@@ -331,6 +375,61 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
 
         {/* Admission & Funding Data Section */}
         <div className="mb-10">
+          {/* Display existing data if available */}
+          {(prof.qsRankingData || prof.deadlineData || prof.applicationReqsData || prof.rpReqsData || prof.tuitionData || prof.scholarshipData || prof.programName) && (
+             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                {prof.programName && (
+                    <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm col-span-full">
+                        <div className="text-[9px] font-black text-purple-600 uppercase tracking-widest mb-1">申请专业</div>
+                        <div className="text-sm font-bold text-gray-800">{prof.programName} {prof.programNameEn ? `(${prof.programNameEn})` : ''}</div>
+                        {prof.programUrl && <a href={prof.programUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">专业官网</a>}
+                    </div>
+                )}
+                {prof.qsRankingData?.value && (
+                    <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                        <div className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">QS World Ranking</div>
+                        <div className="text-sm font-bold text-gray-800">{prof.qsRankingData.value}</div>
+                        {prof.qsRankingData.sourceUrl && <a href={prof.qsRankingData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
+                    </div>
+                )}
+                {prof.deadlineData?.value && (
+                    <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                        <div className="text-[9px] font-black text-red-600 uppercase tracking-widest mb-1">申请截止</div>
+                        <div className="text-sm font-bold text-gray-800">{prof.deadlineData.value}</div>
+                        {prof.deadlineData.sourceUrl && <a href={prof.deadlineData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
+                    </div>
+                )}
+                {prof.applicationReqsData?.value && (
+                    <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                        <div className="text-[9px] font-black text-indigo-600 uppercase tracking-widest mb-1">申请要求</div>
+                        <div className="text-sm font-bold text-gray-800">{prof.applicationReqsData.value}</div>
+                        {prof.applicationReqsData.sourceUrl && <a href={prof.applicationReqsData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
+                    </div>
+                )}
+                {prof.rpReqsData?.value && (
+                    <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                        <div className="text-[9px] font-black text-pink-600 uppercase tracking-widest mb-1">RP要求</div>
+                        <div className="text-sm font-bold text-gray-800">{prof.rpReqsData.value}</div>
+                        {prof.rpReqsData.sourceUrl && <a href={prof.rpReqsData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
+                    </div>
+                )}
+                {prof.tuitionData?.value && (
+                    <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                        <div className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1">学费</div>
+                        <div className="text-sm font-bold text-gray-800">{prof.tuitionData.value}</div>
+                        {prof.tuitionData.sourceUrl && <a href={prof.tuitionData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
+                    </div>
+                )}
+                {prof.scholarshipData?.value && (
+                    <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                        <div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">奖学金</div>
+                        <div className="text-sm font-bold text-gray-800">{prof.scholarshipData.value}</div>
+                        {prof.scholarshipData.sourceUrl && <a href={prof.scholarshipData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
+                    </div>
+                )}
+             </div>
+          )}
+
           {!admissionLoaded ? (
             <button onClick={handleLoadAdmission} disabled={loadingAdmission}
               className="w-full py-3.5 bg-gray-50/80 hover:bg-blue-50 border border-dashed border-gray-200 rounded-2xl text-sm font-bold text-gray-400 hover:text-blue-600 transition-all flex items-center justify-center gap-2 group">
@@ -509,28 +608,29 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                 )}
             </div>
         )}
-
-        {/* Deadline Info */}
-        {prof.deadlineData && (
-             <div className="mt-10 bg-gradient-to-r from-purple-600 to-indigo-600 p-6 rounded-[24px] shadow-xl shadow-purple-100 flex items-center justify-between transform hover:scale-[1.02] transition-transform">
-                <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-white">
-                        <Clock size={24} />
+                {/* Deadline Info */}
+                {prof.deadlineData && (
+                    <div className="mt-10 bg-gradient-to-r from-purple-600 to-indigo-600 p-6 rounded-[24px] shadow-xl shadow-purple-100 flex items-center justify-between transform hover:scale-[1.02] transition-transform">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-white">
+                                <Clock size={24} />
+                            </div>
+                            <div>
+                                <div className="text-[10px] font-black text-white/60 uppercase tracking-widest mb-1">Next Application Deadline</div>
+                                <div className="text-lg font-black text-white leading-none">{prof.deadlineData.value}</div>
+                            </div>
+                        </div>
+                        {prof.deadlineData.sourceUrl && (
+                            <a 
+                                href={prof.deadlineData.sourceUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="px-4 py-2 bg-white/20 backdrop-blur-md text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/30 transition-all flex items-center gap-2"
+                            >
+                                View Source <ExternalLink size={12} />
+                            </a>
+                        )}
                     </div>
-                    <div>
-                        <div className="text-[10px] font-black text-white/60 uppercase tracking-widest mb-1">Next Application Deadline</div>
-                        <div className="text-lg font-black text-white leading-none">{prof.deadlineData.value}</div>
-                    </div>
-                </div>
-                {prof.deadlineData.sourceUrl && (
-                    <a 
-                        href={prof.deadlineData.sourceUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="px-4 py-2 bg-white/20 backdrop-blur-md text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/30 transition-all flex items-center gap-2"
-                    >
-                        View Source <ExternalLink size={12} />
-                    </a>
                 )}
             </div>
         )}

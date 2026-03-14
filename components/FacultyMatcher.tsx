@@ -69,6 +69,10 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
   const [directoryUrl, setDirectoryUrl] = useState('');
   const [manualContent, setManualContent] = useState('');
   
+  // Search Scope States
+  const [useDatabase, setUseDatabase] = useState(true);
+  const [useWebSearch, setUseWebSearch] = useState(true);
+  
   // UI States
   const [results, setResults] = useState<FacultyMember[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -308,25 +312,86 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
     setDimensionResults([]);
 
     try {
-      const decomposed = await generateFacultyMatchesDecomposed({
-        studentProfile,
-        directoryUrl,
-        targets,
-        department,
-        manualContent,
-        targetPosition,
-        entryYear,
-        scholarship,
-        exclusions,
-        businessInfo
+      let localResults: FacultyMember[] = [];
+      let webResults: FacultyMember[] = [];
+      let totalCountNeeded = targets.reduce((sum, t) => sum + (t.count || 5), 0) || 10;
+
+      if (useDatabase && facultyDatabase && facultyDatabase.length > 0) {
+        const keywords = [...department.split(/[,，、+&\s]+|(?:和|与|AND)/gi), ...studentProfile.split(/\s+/)].map(k => k.toLowerCase()).filter(k => k.length > 2);
+        
+        localResults = facultyDatabase.filter(f => {
+           let matchesTarget = targets.length === 0 || targets.some(t => {
+             const regionMatch = !t.region || f.country?.toLowerCase().includes(t.region.toLowerCase());
+             const uniMatch = !t.university || f.university?.toLowerCase().includes(t.university.toLowerCase());
+             return regionMatch && uniMatch;
+           });
+           if (!matchesTarget) return false;
+
+           const textToSearch = `${f.name} ${f.university} ${f.department} ${f.researchAreas.join(' ')} ${f.alignmentDetails}`.toLowerCase();
+           return keywords.some(k => textToSearch.includes(k));
+        });
+
+        // Sort by number of keyword matches (simple relevance)
+        localResults.sort((a, b) => {
+          const textA = `${a.name} ${a.university} ${a.department} ${a.researchAreas.join(' ')} ${a.alignmentDetails}`.toLowerCase();
+          const textB = `${b.name} ${b.university} ${b.department} ${b.researchAreas.join(' ')} ${b.alignmentDetails}`.toLowerCase();
+          const scoreA = keywords.filter(k => textA.includes(k)).length;
+          const scoreB = keywords.filter(k => textB.includes(k)).length;
+          return scoreB - scoreA;
+        });
+
+        localResults = localResults.slice(0, totalCountNeeded);
+      }
+
+      let remainingCount = totalCountNeeded - localResults.length;
+
+      if (useWebSearch && remainingCount > 0) {
+        const adjustedTargets = targets.map(t => ({...t, count: Math.ceil((t.count || 5) * (remainingCount / totalCountNeeded))}));
+        
+        const decomposed = await generateFacultyMatchesDecomposed({
+          studentProfile,
+          directoryUrl,
+          targets: adjustedTargets,
+          department,
+          manualContent,
+          targetPosition,
+          entryYear,
+          scholarship,
+          exclusions,
+          businessInfo
+        });
+        
+        setIsNicheMode(decomposed.isNiche);
+        setNicheReasoning(decomposed.reasoning);
+        setDimensionResults(decomposed.dimensions);
+        webResults = decomposed.allFaculty;
+      }
+
+      const combinedResults = [...localResults];
+      
+      // Deduplicate web results against local results based on name and university
+      const uniqueWebResults = webResults.filter(webProf => 
+        !localResults.some(localProf => 
+          localProf.name.toLowerCase() === webProf.name.toLowerCase() && 
+          localProf.university.toLowerCase() === webProf.university.toLowerCase()
+        )
+      );
+      
+      combinedResults.push(...uniqueWebResults);
+
+      // Final sort by match score if available, otherwise keep local first then web
+      combinedResults.sort((a, b) => {
+          const scoreA = a.matchScore ?? 0;
+          const scoreB = b.matchScore ?? 0;
+          if (scoreA !== scoreB) {
+              return scoreB - scoreA; // Descending order
+          }
+          return 0;
       });
+
+      setResults(combinedResults);
       
-      setIsNicheMode(decomposed.isNiche);
-      setNicheReasoning(decomposed.reasoning);
-      setDimensionResults(decomposed.dimensions);
-      setResults(decomposed.allFaculty);
-      
-      if (decomposed.allFaculty.length === 0) {
+      if (combinedResults.length === 0) {
         setError("未找到匹配的教授。请尝试放宽筛选条件（如职位要求）或提供更具体的背景信息。");
       }
     } catch (err) {
@@ -450,8 +515,15 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
 
   const handleBatchSave = () => {
     if (!results) return;
-    results.forEach(prof => handleSaveToDatabase(prof));
-    alert(`已将 ${results.length} 位导师保存到数据库`);
+    let savedCount = 0;
+    results.forEach(prof => {
+        if (!isFacultyInDB(prof) && !savedNames.has(prof.name)) {
+            handleSaveToDatabase(prof);
+            savedCount++;
+        }
+    });
+    setToast(`已将 ${savedCount} 位新导师保存到数据库`);
+    setTimeout(() => setToast(null), 3000);
   };
 
   const handleBatchLink = () => {
@@ -460,8 +532,15 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
        return;
     }
     if (!results) return;
-    results.forEach(prof => handleLinkToClient(prof));
-    alert(`已将 ${results.length} 位导师推荐给当前学生`);
+    let linkedCount = 0;
+    results.forEach(prof => {
+        if (!isFacultyLinked(prof)) {
+            handleLinkToClient(prof);
+            linkedCount++;
+        }
+    });
+    setToast(`已将 ${linkedCount} 位导师推荐给当前学生`);
+    setTimeout(() => setToast(null), 3000);
   };
 
   // Check if faculty is already in DB
@@ -815,6 +894,43 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
                             onChange={(e) => setBusinessInfo(e.target.value)}
                         />
                     </div>
+                </div>
+            </div>
+
+            {/* Section 4: Search Scope */}
+            <div className="space-y-4">
+                <div className="flex items-center justify-between px-1">
+                    <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                        <div className="w-1.5 h-4 bg-emerald-500 rounded-full shadow-sm shadow-emerald-500/50"></div>
+                        搜索范围
+                    </h3>
+                    <span className="text-[10px] text-gray-400 font-bold">STEP 04</span>
+                </div>
+                <div className="bg-white/40 backdrop-blur-sm rounded-3xl p-5 shadow-sm border border-white/50 space-y-3">
+                    <label className="flex items-center space-x-3 cursor-pointer group">
+                        <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${useDatabase ? 'bg-blue-500 border-blue-500' : 'bg-white border-gray-300 group-hover:border-blue-400'}`}>
+                            {useDatabase && <CheckCircle2 size={14} className="text-white" />}
+                        </div>
+                        <input 
+                            type="checkbox" 
+                            className="hidden" 
+                            checked={useDatabase} 
+                            onChange={(e) => setUseDatabase(e.target.checked)} 
+                        />
+                        <span className="text-sm font-medium text-gray-700">导师库检索 (优先)</span>
+                    </label>
+                    <label className="flex items-center space-x-3 cursor-pointer group">
+                        <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${useWebSearch ? 'bg-blue-500 border-blue-500' : 'bg-white border-gray-300 group-hover:border-blue-400'}`}>
+                            {useWebSearch && <CheckCircle2 size={14} className="text-white" />}
+                        </div>
+                        <input 
+                            type="checkbox" 
+                            className="hidden" 
+                            checked={useWebSearch} 
+                            onChange={(e) => setUseWebSearch(e.target.checked)} 
+                        />
+                        <span className="text-sm font-medium text-gray-700">联网搜索 (补充不足数量)</span>
+                    </label>
                 </div>
             </div>
 

@@ -28,12 +28,23 @@ const InputField = ({ label, icon: Icon, value, onChange, placeholder, required 
 const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpen, onClose, onSave }) => {
   const [form, setForm] = useState({
     name: '',
-    university: '',
-    department: '',
     title: '',
+    university: '',
+    universityEn: '',
+    qsRanking: '',
+    deadline: '',
+    department: '',
+    programNameEn: '',
+    programUrl: '',
+    applicationReqs: '',
+    rpReqs: '',
+    researchAreas: '',
+    alignmentDetails: '',
+    recommendationReason: '',
     email: '',
     profileUrl: '',
-    researchAreas: '',
+    tuition: '',
+    scholarship: '',
     country: '',
     fieldCategory: '',
     subFieldCategory: '',
@@ -55,17 +66,28 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
     const newFaculty: FacultyMember = {
       name: form.name,
       university: form.university,
+      universityEn: form.universityEn,
       department: form.department,
+      programName: form.department, // Using department as programName for manual entry
+      programNameEn: form.programNameEn,
       title: form.title,
       email: form.email,
       profileUrl: form.profileUrl,
       photoUrl: form.photoUrl,
+      programUrl: form.programUrl,
+      qsRanking: form.qsRanking,
+      deadlineData: { value: form.deadline, sourceUrl: '' },
+      applicationReqsData: { value: form.applicationReqs, sourceUrl: '' },
+      rpReqsData: { value: form.rpReqs, sourceUrl: '' },
+      tuitionData: { value: form.tuition, sourceUrl: '' },
+      scholarshipData: { value: form.scholarship, sourceUrl: '' },
       researchAreas: form.researchAreas.split(/[,，]/).map(s => s.trim()).filter(Boolean),
       recentActivities: [],
       activitySummary: '',
       isActive: true,
       matchScore: 0,
-      alignmentDetails: '',
+      alignmentDetails: form.alignmentDetails,
+      recommendationReason: form.recommendationReason,
       matchReasoning: {
         locationCheck: '',
         universityCheck: '',
@@ -90,12 +112,23 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
     onClose();
     setForm({
       name: '',
-      university: '',
-      department: '',
       title: '',
+      university: '',
+      universityEn: '',
+      qsRanking: '',
+      deadline: '',
+      department: '',
+      programNameEn: '',
+      programUrl: '',
+      applicationReqs: '',
+      rpReqs: '',
+      researchAreas: '',
+      alignmentDetails: '',
+      recommendationReason: '',
       email: '',
       profileUrl: '',
-      researchAreas: '',
+      tuition: '',
+      scholarship: '',
       country: '',
       fieldCategory: '',
       subFieldCategory: '',
@@ -124,7 +157,7 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
         <div className="p-8 max-h-[70vh] overflow-y-auto custom-scrollbar bg-white/20 backdrop-blur-sm">
           <div className="grid grid-cols-2 gap-6">
             <InputField 
-              label="姓名" 
+              label="导师姓名" 
               icon={User} 
               value={form.name} 
               onChange={v => setForm({...form, name: v})} 
@@ -132,109 +165,189 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
               required 
             />
             <InputField 
-              label="职级 / 头衔" 
+              label="职称" 
               icon={GraduationCap} 
               value={form.title} 
               onChange={v => setForm({...form, title: v})} 
               placeholder="例如: Professor" 
             />
             <InputField 
-              label="所属院校" 
+              label="学校名称 (中文)" 
               icon={Building} 
               value={form.university} 
               onChange={v => setForm({...form, university: v})} 
-              placeholder="例如: Stanford University" 
+              placeholder="例如: 斯坦福大学" 
               required 
             />
             <InputField 
-              label="院系 / 部门" 
+              label="学校名称 (英文)" 
+              icon={Building} 
+              value={form.universityEn} 
+              onChange={v => setForm({...form, universityEn: v})} 
+              placeholder="例如: Stanford University" 
+            />
+            <InputField 
+              label="2026QS综合排名" 
+              icon={BookOpen} 
+              value={form.qsRanking} 
+              onChange={v => setForm({...form, qsRanking: v})} 
+              placeholder="例如: 1" 
+            />
+            <InputField 
+              label="申请截止日期" 
+              icon={BookOpen} 
+              value={form.deadline} 
+              onChange={v => setForm({...form, deadline: v})} 
+              placeholder="例如: 2026-12-01" 
+            />
+            <InputField 
+              label="专业名称 (中文)" 
               icon={Building} 
               value={form.department} 
               onChange={v => setForm({...form, department: v})} 
+              placeholder="例如: 计算机科学" 
+            />
+            <InputField 
+              label="专业名称 (英文)" 
+              icon={Building} 
+              value={form.programNameEn} 
+              onChange={v => setForm({...form, programNameEn: v})} 
               placeholder="例如: Computer Science" 
             />
             <InputField 
-              label="电子邮箱" 
+              label="专业链接" 
+              icon={Globe} 
+              value={form.programUrl} 
+              onChange={v => setForm({...form, programUrl: v})} 
+              placeholder="https://..." 
+            />
+            <InputField 
+              label="申请要求及材料" 
+              icon={BookOpen} 
+              value={form.applicationReqs} 
+              onChange={v => setForm({...form, applicationReqs: v})} 
+              placeholder="例如: CV, PS, 3 Letters of Recommendation" 
+            />
+            <InputField 
+              label="RP字数要求" 
+              icon={BookOpen} 
+              value={form.rpReqs} 
+              onChange={v => setForm({...form, rpReqs: v})} 
+              placeholder="例如: 2000 words" 
+            />
+            <InputField 
+              label="导师研究方向（论文）" 
+              icon={Tag} 
+              value={form.researchAreas} 
+              onChange={v => setForm({...form, researchAreas: v})} 
+              placeholder="例如: AI, Machine Learning, Computer Vision" 
+            />
+            <InputField 
+              label="匹配深度解析" 
+              icon={BookOpen} 
+              value={form.alignmentDetails} 
+              onChange={v => setForm({...form, alignmentDetails: v})} 
+              placeholder="例如: 研究方向高度匹配" 
+            />
+            <InputField 
+              label="推荐理由" 
+              icon={BookOpen} 
+              value={form.recommendationReason} 
+              onChange={v => setForm({...form, recommendationReason: v})} 
+              placeholder="例如: 领域顶尖专家，资源丰富" 
+            />
+            <InputField 
+              label="导师邮箱" 
               icon={Mail} 
               value={form.email} 
               onChange={v => setForm({...form, email: v})} 
               placeholder="例如: alice@stanford.edu" 
             />
             <InputField 
-              label="个人主页 URL" 
+              label="导师官网链接" 
               icon={Globe} 
               value={form.profileUrl} 
               onChange={v => setForm({...form, profileUrl: v})} 
               placeholder="https://..." 
             />
             <InputField 
-              label="国家 / 地区" 
-              icon={MapPin} 
-              value={form.country} 
-              onChange={v => setForm({...form, country: v})} 
-              placeholder="例如: 美国" 
-            />
-            <InputField 
-              label="二级地区 (如: 北京)" 
-              icon={MapPin} 
-              value={form.subRegion} 
-              onChange={v => setForm({...form, subRegion: v})} 
-              placeholder="例如: 北京" 
-            />
-            <InputField 
-              label="地区路径 (用 &gt; 分隔)" 
-              icon={MapPin} 
-              value={form.regionPath} 
-              onChange={v => setForm({...form, regionPath: v})} 
-              placeholder="例如: 中国 > 陕西 > 西安" 
-            />
-            <InputField 
-              label="学科领域 (一级)" 
+              label="学费" 
               icon={BookOpen} 
-              value={form.fieldCategory} 
-              onChange={v => setForm({...form, fieldCategory: v})} 
-              placeholder="例如: 计算机科学" 
+              value={form.tuition} 
+              onChange={v => setForm({...form, tuition: v})} 
+              placeholder="例如: $50,000/year" 
             />
             <InputField 
-              label="二级分类" 
-              icon={Tag} 
-              value={form.subFieldCategory} 
-              onChange={v => setForm({...form, subFieldCategory: v})} 
-              placeholder="例如: 人工智能" 
+              label="奖学金项目" 
+              icon={BookOpen} 
+              value={form.scholarship} 
+              onChange={v => setForm({...form, scholarship: v})} 
+              placeholder="例如: Full funding available" 
             />
-            <InputField 
-              label="分类路径 (用 &gt; 分隔)" 
-              icon={Tag} 
-              value={form.classificationPath} 
-              onChange={v => setForm({...form, classificationPath: v})} 
-              placeholder="例如: 工程与技术 > 计算机科学 > 人工智能" 
-            />
-            <div className="col-span-2">
-              <InputField 
-                label="研究方向 (用逗号分隔)" 
-                icon={Tag} 
-                value={form.researchAreas} 
-                onChange={v => setForm({...form, researchAreas: v})} 
-                placeholder="例如: AI, Machine Learning, Computer Vision" 
-              />
-            </div>
-            <div className="col-span-2">
-              <InputField 
-                label="分类备注" 
-                icon={BookOpen} 
-                value={form.classificationNote} 
-                onChange={v => setForm({...form, classificationNote: v})} 
-                placeholder="说明分类依据..." 
-              />
-            </div>
-            <div className="col-span-2">
-              <InputField 
-                label="头像 URL (可选)" 
-                icon={User} 
-                value={form.photoUrl} 
-                onChange={v => setForm({...form, photoUrl: v})} 
-                placeholder="https://..." 
-              />
+            <div className="col-span-2 border-t border-gray-200 pt-4 mt-2">
+              <h4 className="text-sm font-bold text-gray-700 mb-4">分类与系统信息 (可选)</h4>
+              <div className="grid grid-cols-2 gap-6">
+                <InputField 
+                  label="国家 / 地区" 
+                  icon={MapPin} 
+                  value={form.country} 
+                  onChange={v => setForm({...form, country: v})} 
+                  placeholder="例如: 美国" 
+                />
+                <InputField 
+                  label="二级地区 (如: 北京)" 
+                  icon={MapPin} 
+                  value={form.subRegion} 
+                  onChange={v => setForm({...form, subRegion: v})} 
+                  placeholder="例如: 北京" 
+                />
+                <InputField 
+                  label="地区路径 (用 &gt; 分隔)" 
+                  icon={MapPin} 
+                  value={form.regionPath} 
+                  onChange={v => setForm({...form, regionPath: v})} 
+                  placeholder="例如: 中国 > 陕西 > 西安" 
+                />
+                <InputField 
+                  label="学科领域 (一级)" 
+                  icon={BookOpen} 
+                  value={form.fieldCategory} 
+                  onChange={v => setForm({...form, fieldCategory: v})} 
+                  placeholder="例如: 计算机科学" 
+                />
+                <InputField 
+                  label="二级分类" 
+                  icon={Tag} 
+                  value={form.subFieldCategory} 
+                  onChange={v => setForm({...form, subFieldCategory: v})} 
+                  placeholder="例如: 人工智能" 
+                />
+                <InputField 
+                  label="分类路径 (用 &gt; 分隔)" 
+                  icon={Tag} 
+                  value={form.classificationPath} 
+                  onChange={v => setForm({...form, classificationPath: v})} 
+                  placeholder="例如: 工程与技术 > 计算机科学 > 人工智能" 
+                />
+                <div className="col-span-2">
+                  <InputField 
+                    label="分类备注" 
+                    icon={BookOpen} 
+                    value={form.classificationNote} 
+                    onChange={v => setForm({...form, classificationNote: v})} 
+                    placeholder="说明分类依据..." 
+                  />
+                </div>
+                <div className="col-span-2">
+                  <InputField 
+                    label="头像 URL (可选)" 
+                    icon={User} 
+                    value={form.photoUrl} 
+                    onChange={v => setForm({...form, photoUrl: v})} 
+                    placeholder="https://..." 
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>

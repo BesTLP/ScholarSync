@@ -1,9 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { FacultyRecord, FacultyMember, Client } from '../types';
 import FacultyCard from './FacultyCard';
 import FacultySearchModal from './FacultySearchModal';
 import FacultyManualEntryModal from './FacultyManualEntryModal';
-import { refreshFacultyData } from '../services/geminiService';
+import BatchClassifyModal from './BatchClassifyModal';
+import FacultyImportPreviewModal from './FacultyImportPreviewModal';
+import { refreshFacultyData, processImportedFacultyRow, processImportedFacultyBatch } from '../services/geminiService';
+import * as XLSX from 'xlsx';
 import { 
   Search, 
   Filter, 
@@ -20,14 +23,17 @@ import {
   UserPlus,
   X,
   RefreshCw,
-  Loader2
+  Loader2,
+  Upload
 } from 'lucide-react';
 
 interface FacultyDatabaseProps {
   facultyDatabase: FacultyRecord[];
   clients: Client[];
   onAddFaculty: (faculty: FacultyMember, country: string, fieldCategory: string, extra?: Partial<FacultyRecord>) => string;
+  onBatchAddFaculty?: (items: { faculty: FacultyMember, country?: string, fieldCategory?: string, extra?: Partial<FacultyRecord> }[]) => void;
   onUpdateFaculty: (id: string, updates: Partial<FacultyRecord>) => void;
+  onBatchUpdateFaculty: (ids: string[], updates: Partial<FacultyRecord>) => void;
   onDeleteFaculty: (id: string) => void;
   onLinkFaculty: (facultyId: string, clientId: string) => void;
   onUnlinkFaculty: (facultyId: string, clientId: string) => void;
@@ -37,7 +43,9 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
   facultyDatabase,
   clients,
   onAddFaculty,
+  onBatchAddFaculty,
   onUpdateFaculty,
+  onBatchUpdateFaculty,
   onDeleteFaculty,
   onLinkFaculty,
   onUnlinkFaculty
@@ -47,15 +55,21 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
   const [selectedCountry, setSelectedCountry] = useState<string>('all');
   const [selectedSubRegion, setSelectedSubRegion] = useState<string>('all');
   const [selectedUniversity, setSelectedUniversity] = useState<string>('all');
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
   const [selectedField, setSelectedField] = useState<string>('all');
   const [selectedSubField, setSelectedSubField] = useState<string>('all');
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isManualEntryModalOpen, setIsManualEntryModalOpen] = useState(false);
+  const [isBatchClassifyModalOpen, setIsBatchClassifyModalOpen] = useState(false);
   const [linkingFacultyId, setLinkingFacultyId] = useState<string | null>(null);
   const [editingFaculty, setEditingFaculty] = useState<FacultyRecord | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  const [importPreviewData, setImportPreviewData] = useState<{ faculty: FacultyMember, country: string, fieldCategory: string }[]>([]);
+  const [isImportPreviewOpen, setIsImportPreviewOpen] = useState(false);
 
   // Derived Data for Filters
   const countries = useMemo(() => Array.from(new Set(facultyDatabase.map(f => f.country))).filter(Boolean).sort(), [facultyDatabase]);
@@ -69,6 +83,13 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
     if (selectedSubRegion !== 'all') relevant = relevant.filter(f => f.subRegion === selectedSubRegion);
     return Array.from(new Set(relevant.map(f => f.university))).filter(Boolean).sort();
   }, [facultyDatabase, selectedCountry, selectedSubRegion]);
+  const departments = useMemo(() => {
+    let relevant = facultyDatabase;
+    if (selectedCountry !== 'all') relevant = relevant.filter(f => f.country === selectedCountry);
+    if (selectedSubRegion !== 'all') relevant = relevant.filter(f => f.subRegion === selectedSubRegion);
+    if (selectedUniversity !== 'all') relevant = relevant.filter(f => f.university === selectedUniversity);
+    return Array.from(new Set(relevant.map(f => f.department))).filter(Boolean).sort();
+  }, [facultyDatabase, selectedCountry, selectedSubRegion, selectedUniversity]);
   const fields = useMemo(() => Array.from(new Set(facultyDatabase.map(f => f.fieldCategory))).filter(Boolean).sort(), [facultyDatabase]);
   const subFields = useMemo(() => {
     const relevant = selectedField === 'all' ? facultyDatabase : facultyDatabase.filter(f => f.fieldCategory === selectedField);
@@ -87,13 +108,14 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
       const matchesCountry = selectedCountry === 'all' || f.country === selectedCountry;
       const matchesSubRegion = selectedSubRegion === 'all' || f.subRegion === selectedSubRegion;
       const matchesUniversity = selectedUniversity === 'all' || f.university === selectedUniversity;
+      const matchesDepartment = selectedDepartment === 'all' || f.department === selectedDepartment;
       const matchesField = selectedField === 'all' || f.fieldCategory === selectedField;
       const matchesSubField = selectedSubField === 'all' || f.subFieldCategory === selectedSubField;
       const matchesTag = selectedTag === 'all' || (f.customTags && f.customTags.includes(selectedTag));
 
-      return matchesSearch && matchesCountry && matchesSubRegion && matchesUniversity && matchesField && matchesSubField && matchesTag;
+      return matchesSearch && matchesCountry && matchesSubRegion && matchesUniversity && matchesDepartment && matchesField && matchesSubField && matchesTag;
     });
-  }, [facultyDatabase, searchQuery, selectedCountry, selectedSubRegion, selectedUniversity, selectedField, selectedSubField, selectedTag]);
+  }, [facultyDatabase, searchQuery, selectedCountry, selectedSubRegion, selectedUniversity, selectedDepartment, selectedField, selectedSubField, selectedTag]);
 
   // Selection Handlers
   const toggleSelection = (id: string) => {
@@ -119,6 +141,107 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
       selectedIds.forEach(id => onDeleteFaculty(id));
       setSelectedIds(new Set());
     }
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    setImportProgress({ current: 0, total: 0 });
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const arrayBuffer = evt.target?.result as ArrayBuffer;
+        const data = new Uint8Array(arrayBuffer);
+        const wb = XLSX.read(data, { type: 'array' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const jsonData = XLSX.utils.sheet_to_json(ws);
+        
+        if (jsonData.length === 0) {
+          alert("文件内容为空。");
+          setIsImporting(false);
+          return;
+        }
+
+        setImportProgress({ current: 0, total: jsonData.length });
+        
+        const previewItems: { faculty: FacultyMember, country: string, fieldCategory: string }[] = [];
+        const BATCH_SIZE = 5; // Reduced from 10 to avoid timeouts
+        
+        // Process in batches to balance speed and rate limits
+        for (let i = 0; i < jsonData.length; i += BATCH_SIZE) {
+          const batch = jsonData.slice(i, i + BATCH_SIZE);
+          setImportProgress({ current: i, total: jsonData.length });
+          
+          try {
+            const processedBatch = await processImportedFacultyBatch(batch);
+            if (processedBatch && processedBatch.length > 0) {
+              previewItems.push(...processedBatch);
+            } else if (batch.length > 0) {
+              // If batch returns empty but had items, try fallback
+              throw new Error("Batch returned empty result");
+            }
+          } catch (err) {
+            console.error(`Error processing batch starting at ${i}, falling back to row-by-row:`, err);
+            
+            // Fallback: process each row in the failed batch individually
+            for (let j = 0; j < batch.length; j++) {
+              const row = batch[j];
+              setImportProgress({ current: i + j, total: jsonData.length });
+              try {
+                const processed = await processImportedFacultyRow(row);
+                if (processed && processed.faculty) {
+                  previewItems.push(processed);
+                }
+              } catch (rowErr) {
+                console.error(`Failed to process row ${i + j}:`, rowErr);
+              }
+            }
+          }
+        }
+        
+        setImportProgress({ current: jsonData.length, total: jsonData.length });
+        
+        if (previewItems.length > 0) {
+          setImportPreviewData(previewItems);
+          setIsImportPreviewOpen(true);
+        } else {
+          alert("未识别到有效的导师信息，请检查文件格式或尝试手动录入。");
+        }
+      } catch (error) {
+        console.error("Error parsing file:", error);
+        alert("文件解析失败，请确保格式正确。");
+      } finally {
+        setIsImporting(false);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleConfirmImport = (items: { faculty: FacultyMember, country: string, fieldCategory: string }[]) => {
+    if (onBatchAddFaculty) {
+      onBatchAddFaculty(items.map(item => ({
+        faculty: item.faculty,
+        country: item.country || '',
+        fieldCategory: item.fieldCategory || '',
+        extra: { classificationSource: 'auto' }
+      })));
+    } else {
+      items.forEach(item => {
+        onAddFaculty(item.faculty, item.country || '', item.fieldCategory || '');
+      });
+    }
+    setIsImportPreviewOpen(false);
+    setImportPreviewData([]);
+    alert(`成功导入 ${items.length} 位导师信息！`);
   };
 
   const handleImportFaculty = (imported: FacultyMember[]) => {
@@ -328,29 +451,71 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
               
               {/* Filters Dropdown (Simplified for now) */}
               <div className="flex items-center gap-2">
-                <select 
-                  value={selectedUniversity} 
-                  onChange={(e) => setSelectedUniversity(e.target.value)}
-                  className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm"
-                >
-                  <option value="all">所有院校</option>
-                  {universities.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-
                 {selectedCountry !== 'all' && subRegions.length > 0 && (
                   <select 
                     value={selectedSubRegion} 
-                    onChange={(e) => setSelectedSubRegion(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedSubRegion(e.target.value);
+                      setSelectedUniversity('all');
+                      setSelectedDepartment('all');
+                    }}
                     className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200"
                   >
                     <option value="all">所有地区</option>
                     {subRegions.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 )}
+
+                <select 
+                  value={selectedUniversity} 
+                  onChange={(e) => {
+                    setSelectedUniversity(e.target.value);
+                    setSelectedDepartment('all');
+                  }}
+                  className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm"
+                >
+                  <option value="all">所有院校</option>
+                  {universities.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+
+                {selectedUniversity !== 'all' && departments.length > 0 && (
+                  <select 
+                    value={selectedDepartment} 
+                    onChange={(e) => setSelectedDepartment(e.target.value)}
+                    className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200"
+                  >
+                    <option value="all">所有院系</option>
+                    {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                )}
               </div>
             </div>
 
             <div className="flex items-center gap-3">
+              <input 
+                type="file" 
+                accept=".xlsx, .xls, .csv" 
+                className="hidden" 
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+              />
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isImporting}
+                className={`flex items-center gap-2 px-4 py-2 bg-white/60 backdrop-blur-sm border border-white/50 text-gray-700 rounded-xl transition-all shadow-sm font-bold ${isImporting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/80 active:scale-95'}`}
+              >
+                {isImporting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    导入中 ({importProgress.current}/{importProgress.total})
+                  </>
+                ) : (
+                  <>
+                    <Upload size={16} />
+                    批量导入
+                  </>
+                )}
+              </button>
               <button 
                 onClick={() => setIsManualEntryModalOpen(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-white/60 backdrop-blur-sm border border-white/50 text-gray-700 rounded-xl hover:bg-white/80 transition-all shadow-sm font-bold active:scale-95"
@@ -377,6 +542,13 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
               {selectedIds.size > 0 && (
                 <div className="flex items-center gap-3 ml-4 pl-4 border-l border-gray-300/50">
                   <span className="text-blue-600 font-bold">已选 {selectedIds.size} 项</span>
+                  <button 
+                    onClick={() => setIsBatchClassifyModalOpen(true)}
+                    className="flex items-center gap-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50/50 px-2 py-1 rounded-lg transition-colors font-bold"
+                  >
+                    <Database size={14} />
+                    批量分类
+                  </button>
                   <button 
                     onClick={handleBatchDelete}
                     className="flex items-center gap-1 text-red-600 hover:text-red-700 hover:bg-red-50/50 px-2 py-1 rounded-lg transition-colors font-bold"
@@ -580,6 +752,16 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
         </div>
       </div>
 
+      <BatchClassifyModal 
+        isOpen={isBatchClassifyModalOpen}
+        onClose={() => setIsBatchClassifyModalOpen(false)}
+        selectedCount={selectedIds.size}
+        onSave={(updates) => {
+          onBatchUpdateFaculty(Array.from(selectedIds), updates);
+          setSelectedIds(new Set());
+        }}
+      />
+
       <FacultySearchModal 
         isOpen={isSearchModalOpen} 
         onClose={() => setIsSearchModalOpen(false)} 
@@ -692,6 +874,167 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                     type="text" 
                     value={editingFaculty.university}
                     onChange={(e) => setEditingFaculty({...editingFaculty, university: e.target.value})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">院校 (英文)</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.universityEn || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, universityEn: e.target.value})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">申请专业 (中文)</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.programName || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, programName: e.target.value})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">申请专业 (英文)</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.programNameEn || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, programNameEn: e.target.value})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">QS排名</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.qsRanking || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, qsRanking: e.target.value})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">推荐理由</label>
+                  <textarea 
+                    value={editingFaculty.recommendationReason || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, recommendationReason: e.target.value})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium h-20 resize-none"
+                  />
+                </div>
+                
+                {/* Source Data Fields */}
+                <div className="col-span-2 pt-4 border-t border-white/50">
+                  <h4 className="text-sm font-black text-gray-900 mb-4">招生与录取详情</h4>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">申请截止日期</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.deadlineData?.value || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, deadlineData: { ...editingFaculty.deadlineData, value: e.target.value, sourceUrl: editingFaculty.deadlineData?.sourceUrl || '' }})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">截止日期来源URL</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.deadlineData?.sourceUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, deadlineData: { ...editingFaculty.deadlineData, sourceUrl: e.target.value, value: editingFaculty.deadlineData?.value || '' }})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+
+                <div className="col-span-2 space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">申请要求及材料</label>
+                  <textarea 
+                    value={editingFaculty.applicationReqsData?.value || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, applicationReqsData: { ...editingFaculty.applicationReqsData, value: e.target.value, sourceUrl: editingFaculty.applicationReqsData?.sourceUrl || '' }})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium h-20 resize-none"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">申请要求来源URL</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.applicationReqsData?.sourceUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, applicationReqsData: { ...editingFaculty.applicationReqsData, sourceUrl: e.target.value, value: editingFaculty.applicationReqsData?.value || '' }})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">RP字数要求</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.rpReqsData?.value || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, rpReqsData: { ...editingFaculty.rpReqsData, value: e.target.value, sourceUrl: editingFaculty.rpReqsData?.sourceUrl || '' }})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">RP要求来源URL</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.rpReqsData?.sourceUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, rpReqsData: { ...editingFaculty.rpReqsData, sourceUrl: e.target.value, value: editingFaculty.rpReqsData?.value || '' }})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">学费</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.tuitionData?.value || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, tuitionData: { ...editingFaculty.tuitionData, value: e.target.value, sourceUrl: editingFaculty.tuitionData?.sourceUrl || '' }})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">学费来源URL</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.tuitionData?.sourceUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, tuitionData: { ...editingFaculty.tuitionData, sourceUrl: e.target.value, value: editingFaculty.tuitionData?.value || '' }})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+
+                <div className="col-span-2 space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">奖学金项目</label>
+                  <textarea 
+                    value={editingFaculty.scholarshipData?.value || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, scholarshipData: { ...editingFaculty.scholarshipData, value: e.target.value, sourceUrl: editingFaculty.scholarshipData?.sourceUrl || '' }})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium h-20 resize-none"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">奖学金来源URL</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.scholarshipData?.sourceUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, scholarshipData: { ...editingFaculty.scholarshipData, sourceUrl: e.target.value, value: editingFaculty.scholarshipData?.value || '' }})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">专业链接</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.programUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, programUrl: e.target.value})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">院校官网链接</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.universityUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, universityUrl: e.target.value})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -828,6 +1171,16 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
           </div>
         </div>
       )}
+      {/* Import Preview Modal */}
+      <FacultyImportPreviewModal 
+        isOpen={isImportPreviewOpen}
+        onClose={() => {
+          setIsImportPreviewOpen(false);
+          setImportPreviewData([]);
+        }}
+        onConfirm={handleConfirmImport}
+        data={importPreviewData}
+      />
     </div>
   );
 };
