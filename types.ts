@@ -47,8 +47,14 @@ export interface FacultyMember {
 export interface FacultyRecord extends FacultyMember {
   // ===== 数据库管理字段 =====
   id: string;                    // 唯一ID (crypto.randomUUID())
-  country: string;               // 国家/地区分类 (如"美国"、"英国"、"中国香港")
+  country: string;               // 国家/地区分类 (如"美国"、"英国"、"中国")
+  subRegion?: string;            // 二级地区 (如"北京"、"加州"、"伦敦")
+  regionPath?: string[];         // 地区路径，如 ["中国", "陕西", "西安"]
   fieldCategory: string;         // 专业/学科分类 (如"计算机科学"、"机械工程")
+  subFieldCategory?: string;     // 二级分类 (如"人工智能"、"机器人学")
+  classificationPath?: string[]; // 多级路径，如 ["工程与技术","计算机科学","人工智能","机器学习"]
+  classificationSource?: 'auto' | 'manual' | 'hybrid';
+  classificationNote?: string;   // 手动分类备注/依据
   customTags?: string[];         // 用户自定义标签 (如"已联系"、"回复快"、"套磁优先")
   addedAt: string;               // 添加到数据库的时间 (ISO格式)
   updatedAt: string;             // 最后修改时间

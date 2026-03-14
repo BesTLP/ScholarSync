@@ -26,7 +26,7 @@ import {
 interface FacultyDatabaseProps {
   facultyDatabase: FacultyRecord[];
   clients: Client[];
-  onAddFaculty: (faculty: FacultyMember, country: string, fieldCategory: string) => string;
+  onAddFaculty: (faculty: FacultyMember, country: string, fieldCategory: string, extra?: Partial<FacultyRecord>) => string;
   onUpdateFaculty: (id: string, updates: Partial<FacultyRecord>) => void;
   onDeleteFaculty: (id: string) => void;
   onLinkFaculty: (facultyId: string, clientId: string) => void;
@@ -45,8 +45,11 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCountry, setSelectedCountry] = useState<string>('all');
+  const [selectedSubRegion, setSelectedSubRegion] = useState<string>('all');
   const [selectedUniversity, setSelectedUniversity] = useState<string>('all');
   const [selectedField, setSelectedField] = useState<string>('all');
+  const [selectedSubField, setSelectedSubField] = useState<string>('all');
+  const [selectedTag, setSelectedTag] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isManualEntryModalOpen, setIsManualEntryModalOpen] = useState(false);
@@ -56,8 +59,22 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
 
   // Derived Data for Filters
   const countries = useMemo(() => Array.from(new Set(facultyDatabase.map(f => f.country))).filter(Boolean).sort(), [facultyDatabase]);
-  const universities = useMemo(() => Array.from(new Set(facultyDatabase.map(f => f.university))).filter(Boolean).sort(), [facultyDatabase]);
+  const subRegions = useMemo(() => {
+    const relevant = selectedCountry === 'all' ? facultyDatabase : facultyDatabase.filter(f => f.country === selectedCountry);
+    return Array.from(new Set(relevant.map(f => f.subRegion).filter(Boolean) as string[])).sort();
+  }, [facultyDatabase, selectedCountry]);
+  const universities = useMemo(() => {
+    let relevant = facultyDatabase;
+    if (selectedCountry !== 'all') relevant = relevant.filter(f => f.country === selectedCountry);
+    if (selectedSubRegion !== 'all') relevant = relevant.filter(f => f.subRegion === selectedSubRegion);
+    return Array.from(new Set(relevant.map(f => f.university))).filter(Boolean).sort();
+  }, [facultyDatabase, selectedCountry, selectedSubRegion]);
   const fields = useMemo(() => Array.from(new Set(facultyDatabase.map(f => f.fieldCategory))).filter(Boolean).sort(), [facultyDatabase]);
+  const subFields = useMemo(() => {
+    const relevant = selectedField === 'all' ? facultyDatabase : facultyDatabase.filter(f => f.fieldCategory === selectedField);
+    return Array.from(new Set(relevant.map(f => f.subFieldCategory).filter(Boolean) as string[])).sort();
+  }, [facultyDatabase, selectedField]);
+  const allTags = useMemo(() => Array.from(new Set(facultyDatabase.flatMap(f => f.customTags || []))).filter(Boolean).sort(), [facultyDatabase]);
 
   // Filtered Data
   const filteredFaculty = useMemo(() => {
@@ -68,12 +85,15 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
         f.researchAreas.some(area => area.toLowerCase().includes(searchQuery.toLowerCase()));
       
       const matchesCountry = selectedCountry === 'all' || f.country === selectedCountry;
+      const matchesSubRegion = selectedSubRegion === 'all' || f.subRegion === selectedSubRegion;
       const matchesUniversity = selectedUniversity === 'all' || f.university === selectedUniversity;
       const matchesField = selectedField === 'all' || f.fieldCategory === selectedField;
+      const matchesSubField = selectedSubField === 'all' || f.subFieldCategory === selectedSubField;
+      const matchesTag = selectedTag === 'all' || (f.customTags && f.customTags.includes(selectedTag));
 
-      return matchesSearch && matchesCountry && matchesUniversity && matchesField;
+      return matchesSearch && matchesCountry && matchesSubRegion && matchesUniversity && matchesField && matchesSubField && matchesTag;
     });
-  }, [facultyDatabase, searchQuery, selectedCountry, selectedUniversity, selectedField]);
+  }, [facultyDatabase, searchQuery, selectedCountry, selectedSubRegion, selectedUniversity, selectedField, selectedSubField, selectedTag]);
 
   // Selection Handlers
   const toggleSelection = (id: string) => {
@@ -103,11 +123,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
 
   const handleImportFaculty = (imported: FacultyMember[]) => {
     imported.forEach(faculty => {
-      const country = faculty.matchReasoning?.locationCheck || "未分类";
-      const field = faculty.department || "未分类";
-      onAddFaculty(faculty, country, field);
+      onAddFaculty(faculty, '', '');
     });
-    alert(`成功导入 ${imported.length} 位导师`);
   };
 
   const handleRefreshFaculty = async (record: FacultyRecord) => {
@@ -179,7 +196,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">按国家/地区</h3>
             <div className="space-y-1">
               <button 
-                onClick={() => setSelectedCountry('all')}
+                onClick={() => { setSelectedCountry('all'); setSelectedSubRegion('all'); }}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedCountry === 'all' ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
               >
                 <span>全部</span>
@@ -187,15 +204,34 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
               </button>
               {countries.map(country => {
                 const count = facultyDatabase.filter(f => f.country === country).length;
+                const isSelected = selectedCountry === country;
                 return (
-                  <button 
-                    key={country}
-                    onClick={() => setSelectedCountry(country)}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedCountry === country ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
-                  >
-                    <span>{country}</span>
-                    <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{count}</span>
-                  </button>
+                  <div key={country} className="space-y-1">
+                    <button 
+                      onClick={() => { setSelectedCountry(country); setSelectedSubRegion('all'); }}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${isSelected ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
+                    >
+                      <span>{country}</span>
+                      <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{count}</span>
+                    </button>
+                    {isSelected && subRegions.length > 0 && (
+                      <div className="pl-4 space-y-1 animate-in slide-in-from-top-1 duration-200">
+                        {subRegions.map(sub => {
+                          const subCount = facultyDatabase.filter(f => f.country === country && f.subRegion === sub).length;
+                          return (
+                            <button
+                              key={sub}
+                              onClick={() => setSelectedSubRegion(sub)}
+                              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all ${selectedSubRegion === sub ? 'text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700 font-medium'}`}
+                            >
+                              <span>{sub}</span>
+                              <span>{subCount}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -206,7 +242,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">按学科领域</h3>
             <div className="space-y-1">
               <button 
-                onClick={() => setSelectedField('all')}
+                onClick={() => { setSelectedField('all'); setSelectedSubField('all'); }}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedField === 'all' ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
               >
                 <span>全部</span>
@@ -214,19 +250,62 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
               </button>
               {fields.map(field => {
                 const count = facultyDatabase.filter(f => f.fieldCategory === field).length;
+                const isSelected = selectedField === field;
                 return (
-                  <button 
-                    key={field}
-                    onClick={() => setSelectedField(field)}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedField === field ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
-                  >
-                    <span>{field}</span>
-                    <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{count}</span>
-                  </button>
+                  <div key={field} className="space-y-1">
+                    <button 
+                      onClick={() => { setSelectedField(field); setSelectedSubField('all'); }}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${isSelected ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
+                    >
+                      <span>{field}</span>
+                      <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{count}</span>
+                    </button>
+                    {isSelected && subFields.length > 0 && (
+                      <div className="pl-4 space-y-1 animate-in slide-in-from-top-1 duration-200">
+                        {subFields.map(sub => {
+                          const subCount = facultyDatabase.filter(f => f.fieldCategory === field && f.subFieldCategory === sub).length;
+                          return (
+                            <button
+                              key={sub}
+                              onClick={() => setSelectedSubField(sub)}
+                              className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition-all ${selectedSubField === sub ? 'text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-white/40'}`}
+                            >
+                              <span>{sub}</span>
+                              <span>{subCount}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
           </div>
+
+          {/* Tag Stats */}
+          {allTags.length > 0 && (
+            <div>
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">按标签</h3>
+              <div className="flex flex-wrap gap-2 px-2">
+                <button
+                  onClick={() => setSelectedTag('all')}
+                  className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${selectedTag === 'all' ? 'bg-blue-600 text-white shadow-md' : 'bg-white/60 text-gray-500 hover:bg-white'}`}
+                >
+                  全部
+                </button>
+                {allTags.map(tag => (
+                  <button
+                    key={tag}
+                    onClick={() => setSelectedTag(tag)}
+                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${selectedTag === tag ? 'bg-blue-600 text-white shadow-md' : 'bg-white/60 text-gray-500 hover:bg-white'}`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -257,6 +336,17 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <option value="all">所有院校</option>
                   {universities.map(u => <option key={u} value={u}>{u}</option>)}
                 </select>
+
+                {selectedCountry !== 'all' && subRegions.length > 0 && (
+                  <select 
+                    value={selectedSubRegion} 
+                    onChange={(e) => setSelectedSubRegion(e.target.value)}
+                    className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200"
+                  >
+                    <option value="all">所有地区</option>
+                    {subRegions.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                )}
               </div>
             </div>
 
@@ -499,8 +589,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
       <FacultyManualEntryModal
         isOpen={isManualEntryModalOpen}
         onClose={() => setIsManualEntryModalOpen(false)}
-        onSave={(faculty, country, fieldCategory) => {
-          onAddFaculty(faculty, country, fieldCategory);
+        onSave={(faculty, country, fieldCategory, extra) => {
+          onAddFaculty(faculty, country, fieldCategory, extra);
           setIsManualEntryModalOpen(false);
         }}
       />
@@ -582,8 +672,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">姓名</label>
                   <input 
                     type="text" 
-                    defaultValue={editingFaculty.name}
-                    id="edit-name"
+                    value={editingFaculty.name}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, name: e.target.value})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -591,8 +681,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">职称</label>
                   <input 
                     type="text" 
-                    defaultValue={editingFaculty.title}
-                    id="edit-title"
+                    value={editingFaculty.title}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, title: e.target.value})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -600,8 +690,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">院校</label>
                   <input 
                     type="text" 
-                    defaultValue={editingFaculty.university}
-                    id="edit-university"
+                    value={editingFaculty.university}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, university: e.target.value})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -609,8 +699,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">学院/系</label>
                   <input 
                     type="text" 
-                    defaultValue={editingFaculty.department}
-                    id="edit-department"
+                    value={editingFaculty.department}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, department: e.target.value})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -618,8 +708,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">邮箱</label>
                   <input 
                     type="email" 
-                    defaultValue={editingFaculty.email}
-                    id="edit-email"
+                    value={editingFaculty.email}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, email: e.target.value})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -627,61 +717,107 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">国家/地区</label>
                   <input 
                     type="text" 
-                    defaultValue={editingFaculty.country}
-                    id="edit-country"
+                    value={editingFaculty.country}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, country: e.target.value})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">学科领域</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">二级地区 (如: 北京)</label>
                   <input 
                     type="text" 
-                    defaultValue={editingFaculty.fieldCategory}
-                    id="edit-field"
+                    value={editingFaculty.subRegion || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, subRegion: e.target.value})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">地区路径 (用 &gt; 分隔)</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.regionPath?.join(' > ') || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, regionPath: e.target.value.split(/[>|/]/).map(s => s.trim()).filter(Boolean)})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">一级学科</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.fieldCategory}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, fieldCategory: e.target.value})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">二级分类</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.subFieldCategory || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, subFieldCategory: e.target.value})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">分类路径 (用 &gt; 分隔)</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.classificationPath?.join(' > ') || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, classificationPath: e.target.value.split(/[>|/]/).map(s => s.trim()).filter(Boolean)})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">研究方向 (逗号分隔)</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.researchAreas.join(', ')}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, researchAreas: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean)})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">分类备注</label>
+                  <textarea 
+                    value={editingFaculty.classificationNote || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, classificationNote: e.target.value})}
+                    className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium h-20 resize-none"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">自定义标签 (逗号分隔)</label>
+                  <input 
+                    type="text" 
+                    value={editingFaculty.customTags?.join(', ') || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, customTags: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean)})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
               </div>
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">研究方向 (逗号分隔)</label>
-                <input 
-                  type="text" 
-                  defaultValue={editingFaculty.researchAreas.join(', ')}
-                  id="edit-research"
-                  className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">备注</label>
-                <textarea 
-                  defaultValue={editingFaculty.notes}
-                  id="edit-notes"
-                  rows={3}
-                  className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none resize-none transition-all shadow-sm font-medium"
-                />
-              </div>
             </div>
             <div className="p-6 bg-white/40 backdrop-blur-sm border-t border-white/50 flex justify-end gap-3">
-              <button
+              <button 
                 onClick={() => setEditingFaculty(null)}
                 className="px-6 py-2.5 text-sm font-bold text-gray-600 hover:bg-white/60 rounded-xl transition-all active:scale-95"
               >
                 取消
               </button>
-              <button
+              <button 
                 onClick={() => {
-                  const updates: Partial<FacultyRecord> = {
-                    name: (document.getElementById('edit-name') as HTMLInputElement).value,
-                    title: (document.getElementById('edit-title') as HTMLInputElement).value,
-                    university: (document.getElementById('edit-university') as HTMLInputElement).value,
-                    department: (document.getElementById('edit-department') as HTMLInputElement).value,
-                    email: (document.getElementById('edit-email') as HTMLInputElement).value,
-                    country: (document.getElementById('edit-country') as HTMLInputElement).value,
-                    fieldCategory: (document.getElementById('edit-field') as HTMLInputElement).value,
-                    researchAreas: (document.getElementById('edit-research') as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean),
-                    notes: (document.getElementById('edit-notes') as HTMLTextAreaElement).value,
-                  };
-                  onUpdateFaculty(editingFaculty.id, updates);
+                  const original = facultyDatabase.find(f => f.id === editingFaculty.id);
+                  const classificationChanged = 
+                    editingFaculty.country !== original?.country ||
+                    editingFaculty.subRegion !== original?.subRegion ||
+                    editingFaculty.fieldCategory !== original?.fieldCategory ||
+                    editingFaculty.subFieldCategory !== original?.subFieldCategory ||
+                    JSON.stringify(editingFaculty.regionPath) !== JSON.stringify(original?.regionPath) ||
+                    JSON.stringify(editingFaculty.classificationPath) !== JSON.stringify(original?.classificationPath);
+
+                  onUpdateFaculty(editingFaculty.id, {
+                    ...editingFaculty,
+                    classificationSource: classificationChanged ? 'manual' : editingFaculty.classificationSource,
+                    updatedAt: new Date().toISOString()
+                  });
                   setEditingFaculty(null);
                 }}
                 className="px-8 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-sm font-bold hover:from-blue-700 hover:to-indigo-700 shadow-md shadow-blue-500/20 transition-all active:scale-95"

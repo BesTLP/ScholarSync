@@ -18,7 +18,8 @@ import {
   RefreshCw,
   MoreHorizontal,
   Loader2,
-  Search
+  Search,
+  ChevronRight
 } from 'lucide-react';
 
 interface FacultyCardProps {
@@ -173,6 +174,32 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
             )}
         </div>
 
+        {/* Classification & Region Path Breadcrumbs */}
+        {(record?.classificationPath || record?.regionPath) && (
+            <div className="mb-6 flex items-center flex-wrap gap-3 text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                {record.regionPath && record.regionPath.length > 0 && (
+                    <div className="flex items-center gap-1.5 bg-emerald-50/50 backdrop-blur-sm px-3 py-1.5 rounded-xl border border-emerald-100/50">
+                        {record.regionPath.map((step, i) => (
+                            <React.Fragment key={i}>
+                                <span className={i === record.regionPath!.length - 1 ? 'text-emerald-600' : ''}>{step}</span>
+                                {i < record.regionPath!.length - 1 && <ChevronRight size={10} className="text-gray-300" />}
+                            </React.Fragment>
+                        ))}
+                    </div>
+                )}
+                {record.classificationPath && record.classificationPath.length > 0 && (
+                    <div className="flex items-center gap-1.5 bg-white/40 backdrop-blur-sm px-3 py-1.5 rounded-xl border border-white/50">
+                        {record.classificationPath.map((step, i) => (
+                            <React.Fragment key={i}>
+                                <span className={i === record.classificationPath!.length - 1 ? 'text-blue-600' : ''}>{step}</span>
+                                {i < record.classificationPath!.length - 1 && <ChevronRight size={10} className="text-gray-300" />}
+                            </React.Fragment>
+                        ))}
+                    </div>
+                )}
+            </div>
+        )}
+
         {/* Header Section */}
         <div className="flex flex-col md:flex-row justify-between items-start mb-10 gap-6">
             {/* Left Side: Photo & Name */}
@@ -278,13 +305,26 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
 
         {/* Alignment Details / Match Reason */}
         {prof.alignmentDetails && (
-            <div className="mb-10 bg-blue-50/30 border-l-4 border-blue-500 p-6 rounded-r-3xl backdrop-blur-sm">
+            <div className="mb-6 bg-blue-50/30 border-l-4 border-blue-500 p-6 rounded-r-3xl backdrop-blur-sm">
                 <h6 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] mb-3 flex items-center gap-2">
                     <Star size={14} className="fill-blue-500" />
                     匹配深度解析
                 </h6>
                 <p className="text-sm text-gray-800 leading-relaxed font-bold italic">
                     "{prof.alignmentDetails}"
+                </p>
+            </div>
+        )}
+
+        {/* Classification Note */}
+        {record?.classificationNote && (
+            <div className="mb-10 bg-amber-50/30 border-l-4 border-amber-500 p-6 rounded-r-3xl backdrop-blur-sm">
+                <h6 className="text-[10px] font-black text-amber-600 uppercase tracking-[0.2em] mb-3 flex items-center gap-2">
+                    <Pencil size={14} className="fill-amber-500 text-white" />
+                    分类备注
+                </h6>
+                <p className="text-sm text-gray-800 leading-relaxed font-medium italic">
+                    {record.classificationNote}
                 </p>
             </div>
         )}
@@ -501,6 +541,16 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                 <div className="flex items-center gap-3">
                     <span className="px-3 py-1.5 bg-gray-100 rounded-lg text-gray-500">{record.country}</span>
                     <span className="px-3 py-1.5 bg-gray-100 rounded-lg text-gray-500">{record.fieldCategory}</span>
+                    {record.subFieldCategory && (
+                        <span className="px-3 py-1.5 bg-gray-100 rounded-lg text-gray-500">{record.subFieldCategory}</span>
+                    )}
+                    <span className={`px-3 py-1.5 rounded-lg font-black ${
+                        record.classificationSource === 'manual' ? 'bg-amber-100 text-amber-700' :
+                        record.classificationSource === 'hybrid' ? 'bg-purple-100 text-purple-700' :
+                        'bg-blue-50 text-blue-600'
+                    }`}>
+                        {record.classificationSource?.toUpperCase() || 'AUTO'}
+                    </span>
                     {record.customTags?.map((tag, i) => (
                         <span key={i} className="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg">{tag}</span>
                     ))}

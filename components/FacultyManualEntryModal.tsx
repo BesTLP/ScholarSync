@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { X, Save, User, Building, GraduationCap, Mail, Globe, MapPin, BookOpen, Tag } from 'lucide-react';
-import { FacultyMember } from '../types';
+import { FacultyMember, FacultyRecord } from '../types';
 
 interface FacultyManualEntryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (faculty: FacultyMember, country: string, fieldCategory: string) => void;
+  onSave: (faculty: FacultyMember, country: string, fieldCategory: string, extra?: Partial<FacultyRecord>) => void;
 }
 
 const InputField = ({ label, icon: Icon, value, onChange, placeholder, required = false }: { label: string; icon?: any; value: string; onChange: (val: string) => void; placeholder?: string; required?: boolean }) => (
@@ -36,6 +36,11 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
     researchAreas: '',
     country: '',
     fieldCategory: '',
+    subFieldCategory: '',
+    subRegion: '',
+    regionPath: '',
+    classificationPath: '',
+    classificationNote: '',
     photoUrl: ''
   });
 
@@ -72,7 +77,16 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
       }
     };
 
-    onSave(newFaculty, form.country || 'Unknown', form.fieldCategory || 'Other');
+    const extra: Partial<FacultyRecord> = {
+      subFieldCategory: form.subFieldCategory,
+      subRegion: form.subRegion,
+      regionPath: form.regionPath.split(/[>|/]/).map(s => s.trim()).filter(Boolean),
+      classificationPath: form.classificationPath.split(/[>|/]/).map(s => s.trim()).filter(Boolean),
+      classificationNote: form.classificationNote,
+      classificationSource: 'manual'
+    };
+
+    onSave(newFaculty, form.country || '未分类', form.fieldCategory || '未分类', extra);
     onClose();
     setForm({
       name: '',
@@ -84,6 +98,11 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
       researchAreas: '',
       country: '',
       fieldCategory: '',
+      subFieldCategory: '',
+      subRegion: '',
+      regionPath: '',
+      classificationPath: '',
+      classificationNote: '',
       photoUrl: ''
     });
   };
@@ -153,14 +172,42 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
               icon={MapPin} 
               value={form.country} 
               onChange={v => setForm({...form, country: v})} 
-              placeholder="例如: USA" 
+              placeholder="例如: 美国" 
             />
             <InputField 
-              label="学科领域" 
+              label="二级地区 (如: 北京)" 
+              icon={MapPin} 
+              value={form.subRegion} 
+              onChange={v => setForm({...form, subRegion: v})} 
+              placeholder="例如: 北京" 
+            />
+            <InputField 
+              label="地区路径 (用 &gt; 分隔)" 
+              icon={MapPin} 
+              value={form.regionPath} 
+              onChange={v => setForm({...form, regionPath: v})} 
+              placeholder="例如: 中国 > 陕西 > 西安" 
+            />
+            <InputField 
+              label="学科领域 (一级)" 
               icon={BookOpen} 
               value={form.fieldCategory} 
               onChange={v => setForm({...form, fieldCategory: v})} 
-              placeholder="例如: Computer Science" 
+              placeholder="例如: 计算机科学" 
+            />
+            <InputField 
+              label="二级分类" 
+              icon={Tag} 
+              value={form.subFieldCategory} 
+              onChange={v => setForm({...form, subFieldCategory: v})} 
+              placeholder="例如: 人工智能" 
+            />
+            <InputField 
+              label="分类路径 (用 &gt; 分隔)" 
+              icon={Tag} 
+              value={form.classificationPath} 
+              onChange={v => setForm({...form, classificationPath: v})} 
+              placeholder="例如: 工程与技术 > 计算机科学 > 人工智能" 
             />
             <div className="col-span-2">
               <InputField 
@@ -169,6 +216,15 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
                 value={form.researchAreas} 
                 onChange={v => setForm({...form, researchAreas: v})} 
                 placeholder="例如: AI, Machine Learning, Computer Vision" 
+              />
+            </div>
+            <div className="col-span-2">
+              <InputField 
+                label="分类备注" 
+                icon={BookOpen} 
+                value={form.classificationNote} 
+                onChange={v => setForm({...form, classificationNote: v})} 
+                placeholder="说明分类依据..." 
               />
             </div>
             <div className="col-span-2">
