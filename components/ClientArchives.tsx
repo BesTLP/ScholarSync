@@ -1,19 +1,18 @@
-import React, { useState } from 'react';
-import { 
-  Users, 
-  Plus, 
-  LayoutList, 
-  LayoutGrid, 
-  ChevronRight,
-  Search,
-  Phone,
+import React, { useMemo, useState } from 'react';
+import {
   Archive,
   ArchiveRestore,
-  Download,
-  Upload,
   CheckSquare,
+  ChevronRight,
+  Download,
+  LayoutGrid,
+  LayoutList,
+  Plus,
+  Search,
   Square,
-  Trash2
+  Trash2,
+  Upload,
+  Users,
 } from 'lucide-react';
 import CreateClientModal from './CreateClientModal';
 import { Client } from '../types';
@@ -28,69 +27,82 @@ interface ClientArchivesProps {
   onDeleteClient?: (clientId: string) => void;
 }
 
-const ClientArchives: React.FC<ClientArchivesProps> = ({ 
-  clients, 
-  onAddClient, 
+const ClientArchives: React.FC<ClientArchivesProps> = ({
+  clients,
+  onAddClient,
   onBatchAddClients,
-  onSelectClient, 
+  onSelectClient,
   onUpdateClient,
   onRestoreClient,
-  onDeleteClient
+  onDeleteClient,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const filteredClients = clients.filter(c => c.status === activeTab);
+  const filteredClients = useMemo(
+    () =>
+      clients
+        .filter((client) => client.status === activeTab)
+        .filter((client) => {
+          if (!searchQuery.trim()) return true;
+          const keyword = searchQuery.trim().toLowerCase();
+          return [client.name, client.advisor, client.contact, client.university, client.targetUniversities, client.targetDepartment]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+            .includes(keyword);
+        }),
+    [activeTab, clients, searchQuery],
+  );
 
   const toggleSelectAll = () => {
     if (selectedIds.size === filteredClients.length) {
       setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filteredClients.map(c => c.id)));
+      return;
     }
+
+    setSelectedIds(new Set(filteredClients.map((client) => client.id)));
   };
 
-  const toggleSelect = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    const newSet = new Set(selectedIds);
-    if (newSet.has(id)) {
-      newSet.delete(id);
-    } else {
-      newSet.add(id);
-    }
-    setSelectedIds(newSet);
+  const toggleSelect = (event: React.MouseEvent, id: string) => {
+    event.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   };
 
   const handleBatchDelete = () => {
     if (selectedIds.size === 0) return;
-    if (window.confirm(`确定要删除选中的 ${selectedIds.size} 位客户吗？此操作无法撤销。`)) {
-      selectedIds.forEach(id => {
-        console.log('Deleting client:', id);
-        onDeleteClient?.(id);
-      });
-      setSelectedIds(new Set());
-    }
+    if (!window.confirm(`确定要删除选中的 ${selectedIds.size} 位学生吗？此操作无法撤销。`)) return;
+
+    selectedIds.forEach((id) => onDeleteClient?.(id));
+    setSelectedIds(new Set());
   };
 
   const handleBatchArchive = () => {
     if (selectedIds.size === 0) return;
-    const newStatus = activeTab === 'active' ? 'archived' : 'active';
-    clients.forEach(c => {
-      if (selectedIds.has(c.id)) {
-        onUpdateClient?.({ ...c, status: newStatus });
+    const nextStatus = activeTab === 'active' ? 'archived' : 'active';
+
+    clients.forEach((client) => {
+      if (selectedIds.has(client.id)) {
+        onUpdateClient?.({ ...client, status: nextStatus });
       }
     });
+
     setSelectedIds(new Set());
   };
 
   const handleExportJSON = () => {
-    window.alert('正在导出客户信息...');
-    const targetClients = selectedIds.size > 0 
-      ? clients.filter(c => selectedIds.has(c.id))
-      : filteredClients;
-
+    const targetClients = selectedIds.size > 0 ? clients.filter((client) => selectedIds.has(client.id)) : filteredClients;
     if (targetClients.length === 0) return;
 
     const data = JSON.stringify(targetClients, null, 2);
@@ -98,295 +110,279 @@ const ClientArchives: React.FC<ClientArchivesProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `ScholarSync_Clients_${new Date().toISOString().split('T')[0]}.json`;
+    link.download = `留学咩_学生档案_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
-  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleImportJSON = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = (loadEvent) => {
       try {
-        const result = event.target?.result as string;
-        if (!result) throw new Error('Empty file content');
-        
-        console.log('Importing JSON data length:', result.length);
-        const data = JSON.parse(result);
-        const importedClients = Array.isArray(data) ? data : [data];
-        
+        const result = loadEvent.target?.result as string;
+        if (!result) return;
+        const parsed = JSON.parse(result);
+        const importedClients = Array.isArray(parsed) ? parsed : [parsed];
         if (importedClients.length === 0) {
-          window.alert('文件内容为空');
+          window.alert('文件内容为空。');
           return;
         }
 
-        if (onBatchAddClients) {
-          onBatchAddClients(importedClients);
-          window.alert(`成功导入 ${importedClients.length} 位客户`);
-        } else {
-          console.error('onBatchAddClients callback is missing');
-        }
-      } catch (err) {
-        console.error('Import failed:', err);
-        window.alert('导入失败：文件格式不正确或内容损坏');
+        onBatchAddClients?.(importedClients);
+        window.alert(`已成功导入 ${importedClients.length} 位学生。`);
+      } catch (error) {
+        console.error('Import failed', error);
+        window.alert('导入失败，文件格式不正确。');
       }
     };
     reader.readAsText(file);
-    // Reset input
-    e.target.value = '';
+    event.target.value = '';
   };
 
   return (
     <div className="min-h-screen bg-transparent p-8">
-      {/* Breadcrumbs & Header */}
-      <div className="flex justify-between items-start mb-8">
+      <div className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <nav className="flex items-center space-x-2 text-xs font-medium mb-3">
-            <span className="text-gray-500">留学咩</span>
-            <ChevronRight size={12} className="text-gray-400" />
-            <button className="text-blue-600 hover:text-blue-700 transition-colors font-bold">客户</button>
-          </nav>
-          <h1 className="text-2xl font-bold text-gray-900 mb-1 tracking-tight">学生档案</h1>
-          <p className="text-sm text-gray-500 font-medium">管理您的所有客户信息</p>
+          <div className="mb-3 text-xs font-medium text-slate-400">留学咩 / 学生档案</div>
+          <h1 className="text-3xl font-black tracking-tight text-slate-900">学生档案</h1>
+          <p className="mt-2 text-sm text-slate-500">默认展示全部学生，支持搜索、批量归档和 JSON 导入导出。</p>
         </div>
-        <div className="flex items-center space-x-3">
+
+        <div className="flex flex-wrap items-center gap-3">
           {selectedIds.size > 0 && (
-            <div className="flex items-center bg-white/60 backdrop-blur-sm border border-white/50 rounded-2xl p-1 shadow-sm mr-2">
-              <button 
+            <div className="flex items-center rounded-2xl border border-white/70 bg-white/75 p-1 shadow-sm">
+              <button
                 onClick={handleBatchArchive}
-                className="flex items-center px-3 py-1.5 text-gray-600 hover:text-blue-600 hover:bg-white rounded-xl text-xs font-bold transition-all"
+                className="flex items-center rounded-xl px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-white"
               >
                 {activeTab === 'active' ? <Archive size={14} className="mr-1.5" /> : <ArchiveRestore size={14} className="mr-1.5" />}
-                {activeTab === 'active' ? '归档' : '恢复'}
+                {activeTab === 'active' ? '批量归档' : '批量恢复'}
               </button>
-              <button 
+              <button
                 onClick={handleBatchDelete}
-                className="flex items-center px-3 py-1.5 text-gray-600 hover:text-red-600 hover:bg-white rounded-xl text-xs font-bold transition-all"
+                className="flex items-center rounded-xl px-3 py-2 text-xs font-bold text-rose-600 transition hover:bg-rose-50"
               >
                 <Trash2 size={14} className="mr-1.5" />
-                删除
+                批量删除
               </button>
             </div>
           )}
-          <label className="flex items-center px-4 py-2.5 bg-white/60 backdrop-blur-sm border border-white/50 text-gray-700 rounded-2xl text-sm font-bold hover:bg-white/80 transition-all shadow-sm cursor-pointer active:scale-95">
-            <Upload size={18} className="mr-2 text-blue-600" />
+
+          <label className="flex cursor-pointer items-center rounded-2xl border border-white/70 bg-white/75 px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-white">
+            <Upload size={16} className="mr-2 text-blue-600" />
             导入 JSON
             <input type="file" accept=".json" className="hidden" onChange={handleImportJSON} />
           </label>
-          <button 
+
+          <button
             onClick={handleExportJSON}
-            className="flex items-center px-4 py-2.5 bg-white/60 backdrop-blur-sm border border-white/50 text-gray-700 rounded-2xl text-sm font-bold hover:bg-white/80 transition-all shadow-sm active:scale-95"
+            className="flex items-center rounded-2xl border border-white/70 bg-white/75 px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-white"
           >
-            <Download size={18} className="mr-2 text-blue-600" />
-            导出 JSON {selectedIds.size > 0 && `(${selectedIds.size})`}
+            <Download size={16} className="mr-2 text-blue-600" />
+            导出 JSON
           </button>
-          <button 
+
+          <button
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl text-sm font-bold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md shadow-blue-500/20 active:scale-95"
+            className="flex items-center rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-blue-500/20 transition hover:from-blue-700 hover:to-indigo-700"
           >
-            <Plus size={18} className="mr-2" />
-            创建客户
+            <Plus size={16} className="mr-2" />
+            新建学生
           </button>
         </div>
       </div>
 
-      {/* Filter & View Switch Bar */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-8 border-b border-gray-200/50 flex-1">
-          <button 
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-1 items-center gap-6 border-b border-slate-200/60 pb-3">
+          <button
             onClick={toggleSelectAll}
-            className="pb-3 text-gray-400 hover:text-blue-600 transition-colors"
-            title={selectedIds.size === filteredClients.length ? "取消全选" : "全选"}
+            className="text-slate-400 transition hover:text-blue-600"
+            title={selectedIds.size === filteredClients.length ? '取消全选' : '全选当前结果'}
           >
             {selectedIds.size === filteredClients.length && filteredClients.length > 0 ? <CheckSquare size={18} /> : <Square size={18} />}
           </button>
-          <button 
+
+          <button
             onClick={() => setActiveTab('active')}
-            className={`pb-3 text-sm font-bold transition-all relative ${
-              activeTab === 'active' ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'
-            }`}
+            className={`relative pb-1 text-sm font-bold ${activeTab === 'active' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
           >
-            服务中 <span className="ml-1 text-[10px] bg-white/60 backdrop-blur-sm px-1.5 py-0.5 rounded-full text-gray-600 shadow-sm">{clients.filter(c => c.status === 'active').length}</span>
-            {activeTab === 'active' && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 rounded-full" />
-            )}
+            服务中
+            <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{clients.filter((client) => client.status === 'active').length}</span>
+            {activeTab === 'active' && <span className="absolute inset-x-0 bottom-[-13px] h-0.5 rounded-full bg-blue-600" />}
           </button>
-          <button 
+
+          <button
             onClick={() => setActiveTab('archived')}
-            className={`pb-3 text-sm font-bold transition-all relative ${
-              activeTab === 'archived' ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'
-            }`}
+            className={`relative pb-1 text-sm font-bold ${activeTab === 'archived' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
           >
             已归档
-            {activeTab === 'archived' && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 rounded-full" />
-            )}
+            {activeTab === 'archived' && <span className="absolute inset-x-0 bottom-[-13px] h-0.5 rounded-full bg-blue-600" />}
           </button>
         </div>
-        
-        <div className="flex items-center ml-8 space-x-2">
-          <div className="flex glass p-1 rounded-xl shadow-sm">
-            <button 
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative min-w-[240px]">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="搜索学生、顾问、学校或申请方向"
+              className="w-full rounded-2xl border border-white/70 bg-white/75 py-2.5 pl-10 pr-4 text-sm shadow-sm outline-none transition focus:border-blue-200 focus:bg-white"
+            />
+          </div>
+
+          <div className="flex rounded-xl border border-white/70 bg-white/75 p-1 shadow-sm">
+            <button
               onClick={() => setViewMode('list')}
-              className={`p-1.5 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white/80 text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+              className={`rounded-lg p-1.5 transition ${viewMode === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
             >
-              <LayoutList size={18} />
+              <LayoutList size={16} />
             </button>
-            <button 
+            <button
               onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white/80 text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+              className={`rounded-lg p-1.5 transition ${viewMode === 'grid' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
             >
-              <LayoutGrid size={18} />
+              <LayoutGrid size={16} />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Content Area */}
       {filteredClients.length > 0 ? (
-        <div className={viewMode === 'list' ? 'space-y-4' : 'grid grid-cols-3 gap-6'}>
-          {filteredClients.map(client => (
-            <div 
-              key={client.id} 
+        <div className={viewMode === 'list' ? 'space-y-4' : 'grid grid-cols-1 gap-6 xl:grid-cols-3'}>
+          {filteredClients.map((client) => (
+            <div
+              key={client.id}
               onClick={() => onSelectClient(client)}
-              className={`glass p-6 rounded-3xl shadow-sm flex ${viewMode === 'list' ? 'items-center justify-between' : 'flex-col items-start space-y-4'} group hover:border-blue-200 hover:shadow-md transition-all duration-300 cursor-pointer hover:scale-[1.01] ${selectedIds.has(client.id) ? 'border-blue-500 bg-blue-50/30' : ''}`}
+              className={`glass cursor-pointer rounded-3xl border p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md ${
+                viewMode === 'list' ? 'flex items-center justify-between' : 'space-y-4'
+              } ${selectedIds.has(client.id) ? 'border-blue-300 bg-blue-50/30' : 'border-white/60'}`}
             >
-              <div className={`flex ${viewMode === 'list' ? 'items-center' : 'w-full justify-between items-start'} space-x-4`}>
-                <div className="flex items-center space-x-4">
-                  <button 
-                    onClick={(e) => toggleSelect(e, client.id)}
-                    className={`p-1 rounded-lg transition-colors ${selectedIds.has(client.id) ? 'text-blue-600' : 'text-gray-300 hover:text-gray-400'}`}
+              <div className={`flex ${viewMode === 'list' ? 'items-center' : 'items-start justify-between'} gap-4`}>
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={(event) => toggleSelect(event, client.id)}
+                    className={`rounded-lg p-1 transition ${selectedIds.has(client.id) ? 'text-blue-600' : 'text-slate-300 hover:text-slate-500'}`}
                   >
-                    {selectedIds.has(client.id) ? <CheckSquare size={20} /> : <Square size={20} />}
+                    {selectedIds.has(client.id) ? <CheckSquare size={18} /> : <Square size={18} />}
                   </button>
-                  <div className="w-12 h-12 bg-white/60 backdrop-blur-sm rounded-full flex items-center justify-center text-gray-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors overflow-hidden shadow-sm">
-                    <img 
-                      src={client.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`} 
-                      alt="avatar" 
-                      className="w-full h-full object-cover"
+
+                  <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-slate-100 bg-white shadow-sm">
+                    <img
+                      src={client.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`}
+                      alt={client.name}
+                      className="h-full w-full object-cover"
                     />
                   </div>
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <h4 className="font-bold text-gray-900 tracking-tight">{client.name}</h4>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm ${
-                        client.status === 'active' ? 'bg-emerald-50/80 text-emerald-600 border border-emerald-100/50' : 'bg-gray-100/80 text-gray-500 border border-gray-200/50'
-                      }`}>
+
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="truncate text-base font-black text-slate-900">{client.name}</h4>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          client.status === 'active' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
                         {client.status === 'active' ? '服务中' : '已归档'}
                       </span>
                     </div>
-                    <div className="flex items-center text-[10px] text-gray-500 mt-1 font-medium">
-                      <Phone size={10} className="mr-1" />
-                      {client.contact || '暂无联系方式'}
+                    <div className="mt-1 text-xs text-slate-500">
+                      顾问：{client.advisor || '未分配'} · 联系方式：{client.contact || '暂无'}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-400">
+                      目标：{client.targetCountries || '未填写国家'} / {client.targetUniversities || '未填写学校'} / {client.targetDepartment || '未填写方向'}
                     </div>
                   </div>
                 </div>
 
                 {viewMode === 'grid' && (
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center gap-2">
                     {activeTab === 'archived' && onRestoreClient && (
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
                           onRestoreClient(client.id);
                         }}
-                        className="p-2 text-blue-500 hover:bg-blue-50/50 rounded-xl transition-all flex items-center text-[10px] font-bold active:scale-95"
-                        title="恢复到服务中"
+                        className="rounded-xl p-2 text-blue-600 transition hover:bg-blue-50"
+                        title="恢复"
                       >
-                        <ArchiveRestore size={14} />
+                        <ArchiveRestore size={15} />
                       </button>
                     )}
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          window.alert('点击了删除按钮: ' + client.id);
-                          if (window.confirm('确定要删除该客户吗？此操作无法撤销。')) {
-                            console.log('Individual delete client:', client.id);
-                            onDeleteClient?.(client.id);
-                          }
-                        }}
-                        className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                        title="删除客户"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    <ChevronRight size={16} className="text-gray-300 group-hover:text-blue-500 transition-colors" />
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (window.confirm('确定要删除这位学生吗？此操作无法撤销。')) {
+                          onDeleteClient?.(client.id);
+                        }
+                      }}
+                      className="rounded-xl p-2 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"
+                      title="删除"
+                    >
+                      <Trash2 size={15} />
+                    </button>
                   </div>
                 )}
               </div>
 
-              <div className={`flex ${viewMode === 'list' ? 'flex-col items-end' : 'w-full justify-between items-center'}`}>
-                {viewMode === 'list' ? (
-                  <>
-                    <div className="flex items-center space-x-2">
-                      {activeTab === 'archived' && onRestoreClient && (
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRestoreClient(client.id);
-                          }}
-                          className="p-2 text-blue-500 hover:bg-blue-50/50 rounded-xl transition-all flex items-center text-[10px] font-bold active:scale-95"
-                          title="恢复到服务中"
-                        >
-                          <ArchiveRestore size={14} className="mr-1" />
-                          恢复
-                        </button>
-                      )}
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (window.confirm('确定要删除该客户吗？此操作无法撤销。')) {
-                            console.log('Individual delete client (list):', client.id);
-                            onDeleteClient?.(client.id);
-                          }
-                        }}
-                        className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                        title="删除客户"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                      <button className="p-2 text-gray-300 hover:text-blue-500 hover:bg-white/50 rounded-xl transition-all">
-                        <ChevronRight size={20} />
-                      </button>
-                    </div>
-                    <span className="text-[10px] text-gray-400 mt-2 font-medium">{client.createdAt}</span>
-                  </>
-                ) : (
-                  <span className="text-[10px] text-gray-400 font-medium">{client.createdAt}</span>
-                )}
-              </div>
+              {viewMode === 'list' ? (
+                <div className="flex items-center gap-3">
+                  {activeTab === 'archived' && onRestoreClient && (
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRestoreClient(client.id);
+                      }}
+                      className="rounded-xl px-3 py-2 text-xs font-bold text-blue-600 transition hover:bg-blue-50"
+                    >
+                      恢复
+                    </button>
+                  )}
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (window.confirm('确定要删除这位学生吗？此操作无法撤销。')) {
+                        onDeleteClient?.(client.id);
+                      }
+                    }}
+                    className="rounded-xl p-2 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                  <ChevronRight size={18} className="text-slate-300" />
+                </div>
+              ) : (
+                <div className="flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-400">
+                  <span>创建于 {client.createdAt}</span>
+                  <ChevronRight size={16} className="text-slate-300" />
+                </div>
+              )}
             </div>
           ))}
         </div>
       ) : (
-        <div className="glass rounded-3xl shadow-sm min-h-[500px] flex flex-col items-center justify-center p-12 text-center">
-          <div className="w-20 h-20 bg-white/50 backdrop-blur-sm rounded-full flex items-center justify-center text-gray-400 mb-6 shadow-sm">
+        <div className="glass flex min-h-[480px] flex-col items-center justify-center rounded-3xl border border-white/60 p-12 text-center shadow-sm">
+          <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-white/70 text-slate-300 shadow-sm">
             <Users size={40} />
           </div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2 tracking-tight">暂无学生档案</h3>
-          <p className="text-sm text-gray-500 mb-8 max-w-xs font-medium">
-            创建您的第一个学生档案开始使用
-          </p>
-          <button 
+          <h3 className="text-2xl font-black text-slate-900">暂无学生档案</h3>
+          <p className="mt-2 max-w-sm text-sm text-slate-500">创建你的第一位学生，或者导入已有 JSON 档案。</p>
+          <button
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl text-sm font-bold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-lg shadow-blue-500/20 active:scale-95"
+            className="mt-8 flex items-center rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 text-sm font-bold text-white shadow-md shadow-blue-500/20 transition hover:from-blue-700 hover:to-indigo-700"
           >
-            <Plus size={20} className="mr-2" />
-            创建客户
+            <Plus size={18} className="mr-2" />
+            创建学生
           </button>
         </div>
       )}
 
-      {/* Modal */}
-      <CreateClientModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        onConfirm={onAddClient}
-      />
+      <CreateClientModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onConfirm={onAddClient} />
     </div>
   );
 };

@@ -31,6 +31,8 @@ interface EditorSidebarProps {
   prompt: string;
   setPrompt: (val: string) => void;
   isGenerating: boolean;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 const EditorSidebar: React.FC<EditorSidebarProps> = ({ 
@@ -45,7 +47,9 @@ const EditorSidebar: React.FC<EditorSidebarProps> = ({
   setStyle,
   prompt,
   setPrompt,
-  isGenerating
+  isGenerating,
+  isCollapsed,
+  onToggleCollapse
 }) => {
   const [showClientSelect, setShowClientSelect] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,7 +58,17 @@ const EditorSidebar: React.FC<EditorSidebarProps> = ({
   const filteredClients = clients.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
-    <div className="w-[320px] bg-white border-r border-gray-100 flex flex-col h-full overflow-y-auto custom-scrollbar">
+    <div className={`${isCollapsed ? 'w-[72px]' : 'w-[320px]'} relative bg-white border-r border-gray-100 flex flex-col h-full overflow-visible custom-scrollbar transition-all duration-300`}>
+      <div className={`border-b border-gray-100 p-4 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'}`}>
+        {!isCollapsed && <h3 className="text-base font-bold text-gray-900">自由创作</h3>}
+      </div>
+      {isCollapsed ? (
+        <div className="flex flex-1 items-center justify-center p-3">
+          <button onClick={onToggleCollapse} className="p-3 rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100">
+            <Search size={18} />
+          </button>
+        </div>
+      ) : (
       <div className="p-6 space-y-8">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -179,6 +193,16 @@ const EditorSidebar: React.FC<EditorSidebarProps> = ({
           提交生成 AI
         </button>
       </div>
+      )}
+      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center">
+        <button
+          onClick={onToggleCollapse}
+          className="pointer-events-auto mr-[-18px] flex h-16 w-9 items-center justify-center rounded-r-2xl rounded-l-xl border border-gray-200 bg-white text-gray-500 shadow-lg transition-all hover:text-gray-800"
+          title={isCollapsed ? '展开侧栏' : '收起侧栏'}
+        >
+          {isCollapsed ? <ChevronRight size={18} strokeWidth={2.8} /> : <ChevronLeft size={18} strokeWidth={2.8} />}
+        </button>
+      </div>
     </div>
   );
 };
@@ -196,7 +220,8 @@ interface FreeWriteWorkbenchProps {
 }
 
 const FreeWriteWorkbench: React.FC<FreeWriteWorkbenchProps> = ({ clients, onTabChange, onAddClientClick, onSaveDocument, initialDocument, onBack, initialClientId }) => {
-  const [selectedClientId, setSelectedClientId] = useState<string>(initialClientId || '');
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [selectedClientId, setSelectedClientId] = useState<string>(initialClientId || '');
   const [documentContent, setDocumentContent] = useState<string>(initialDocument?.content || '');
   const [essayLength, setEssayLength] = useState(600);
   const [style, setStyle] = useState('Narrative');
@@ -279,6 +304,8 @@ const FreeWriteWorkbench: React.FC<FreeWriteWorkbenchProps> = ({ clients, onTabC
         prompt={prompt}
         setPrompt={setPrompt}
         isGenerating={isGenerating}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
       />
       
       <div className="flex-1 flex flex-col min-w-0 relative h-full">

@@ -1,38 +1,38 @@
 import React from 'react';
 import {
-  LayoutDashboard,
-  UserSquare,
-  FolderOpen,
-  Wand2,
-  Search,
-  FileText,
   BookOpen,
-  Mail,
-  FileUser,
+  ChevronLeft,
+  ChevronRight,
+  Database,
   Edit3,
-  ShieldCheck,
+  FileText,
+  FileUser,
+  FolderOpen,
+  LayoutDashboard,
+  Mail,
+  Search,
   Settings,
   Share2,
+  ShieldCheck,
   Triangle,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Database
+  UserSquare,
+  Wand2,
 } from 'lucide-react';
 
-export type TabId = 
-  | 'dashboard' 
-  | 'users' 
-  | 'projects' 
-  | 'agent' 
-  | 'faculty-matcher' 
+export type TabId =
+  | 'dashboard'
+  | 'users'
+  | 'projects'
+  | 'agent'
+  | 'faculty-matcher'
   | 'faculty-db'
-  | 'ps' 
-  | 'essay' 
-  | 'lor' 
-  | 'cv' 
-  | 'freewrite' 
-  | 'ai-shield' 
-  | 'settings' 
+  | 'ps'
+  | 'essay'
+  | 'lor'
+  | 'cv'
+  | 'freewrite'
+  | 'ai-shield'
+  | 'settings'
   | 'share';
 
 interface NavItemProps {
@@ -43,52 +43,11 @@ interface NavItemProps {
   isCollapsed?: boolean;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick, isCollapsed }) => {
-  return (
-    <div className="px-3 py-1">
-      <div
-        onClick={onClick}
-        className={`
-          relative flex items-center ${isCollapsed ? 'justify-center p-2' : 'px-4 py-2.5'} cursor-pointer transition-all duration-300 ease-out group
-          ${isActive ? 'bg-white/60 backdrop-blur-sm shadow-sm rounded-xl text-blue-600 font-semibold' : 'text-gray-600 hover:bg-white/40 hover:text-gray-900 rounded-xl'}
-        `}
-        title={isCollapsed ? label : ''}
-      >
-        <Icon size={18} className={`${isCollapsed ? '' : 'mr-3'} transition-transform duration-300 group-hover:scale-110`} strokeWidth={isActive ? 2.5 : 2} />
-        {!isCollapsed && <span className="text-sm">{label}</span>}
-        
-        {/* Tooltip for collapsed state */}
-        {isCollapsed && (
-          <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900/80 backdrop-blur-md text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg">
-            {label}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 interface NavGroupProps {
   title: string;
   children: React.ReactNode;
   isCollapsed?: boolean;
 }
-
-const NavGroup: React.FC<NavGroupProps> = ({ title, children, isCollapsed }) => {
-  return (
-    <div className="mb-2 mt-4">
-      {!isCollapsed && (
-        <div className="px-6 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-[0.15em]">
-          {title}
-        </div>
-      )}
-      {isCollapsed && (
-        <div className="h-px bg-gray-200/50 mx-4 my-3" />
-      )}
-      <div className={`${isCollapsed ? 'space-y-1' : 'space-y-0.5'}`}>{children}</div>
-    </div>
-  );
-};
 
 interface SidebarProps {
   activeTab: TabId;
@@ -97,65 +56,176 @@ interface SidebarProps {
   onToggleCollapse: () => void;
 }
 
+const navGroups: Array<{
+  title: string;
+  items: Array<{ id: TabId; icon: React.ElementType; label: string }>;
+}> = [
+  {
+    title: '工作台',
+    items: [
+      { id: 'dashboard', icon: LayoutDashboard, label: '总览' },
+      { id: 'users', icon: UserSquare, label: '学生档案' },
+      { id: 'projects', icon: FolderOpen, label: '我的作品' },
+    ],
+  },
+  {
+    title: '核心流程',
+    items: [
+      { id: 'agent', icon: Wand2, label: '文书 Agent' },
+      { id: 'faculty-matcher', icon: Search, label: '导师匹配' },
+      { id: 'faculty-db', icon: Database, label: '导师库' },
+    ],
+  },
+  {
+    title: '写作工具',
+    items: [
+      { id: 'ps', icon: FileText, label: 'PS' },
+      { id: 'essay', icon: BookOpen, label: '命题作文' },
+      { id: 'lor', icon: Mail, label: '推荐信' },
+      { id: 'cv', icon: FileUser, label: 'CV' },
+      { id: 'freewrite', icon: Edit3, label: '自由写作' },
+    ],
+  },
+  {
+    title: '辅助能力',
+    items: [{ id: 'ai-shield', icon: ShieldCheck, label: 'AI Shield' }],
+  },
+  {
+    title: '系统',
+    items: [
+      { id: 'settings', icon: Settings, label: '设置' },
+      { id: 'share', icon: Share2, label: '合作与分享' },
+    ],
+  },
+];
+
+const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, isActive, onClick, isCollapsed }) => (
+  <div className="px-2">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group mac-source-list-item relative flex w-full items-center rounded-2xl transition-all duration-200 ${
+        isCollapsed ? 'justify-center px-3 py-3' : 'gap-3 px-4 py-3 text-left'
+      } ${isActive ? 'bg-blue-50 text-blue-700 shadow-sm' : ''}`}
+      title={isCollapsed ? label : ''}
+    >
+      <Icon size={18} strokeWidth={isActive ? 2.35 : 2} className={isActive ? 'text-blue-600' : ''} />
+      {!isCollapsed && <span className="truncate text-sm font-semibold">{label}</span>}
+      {isCollapsed && (
+        <div className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-xl bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+          {label}
+        </div>
+      )}
+    </button>
+  </div>
+);
+
+const NavGroup: React.FC<NavGroupProps> = ({ title, children, isCollapsed }) => (
+  <section className="mt-5 first:mt-0">
+    {!isCollapsed && <div className="mac-section-title px-5 pb-2">{title}</div>}
+    {isCollapsed && <div className="soft-divider mx-3 my-3" />}
+    <div className="space-y-1">{children}</div>
+  </section>
+);
+
 const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isCollapsed, onToggleCollapse }) => {
   return (
-    <div className={`${isCollapsed ? 'w-[80px]' : 'w-[260px]'} h-screen glass border-r border-white/40 flex flex-col shrink-0 overflow-hidden transition-all duration-300 ease-out z-50`}>
-      {/* Logo Area */}
-      <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'} px-6 py-6 shrink-0`}>
-        {!isCollapsed && (
-          <div className="flex items-center">
-            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white mr-3 shadow-md shadow-blue-500/20">
+    <aside
+      className={`mac-panel relative flex h-[calc(100vh-2rem)] shrink-0 flex-col overflow-visible rounded-[30px] transition-all duration-300 ${
+        isCollapsed ? 'w-[88px]' : 'w-[272px]'
+      }`}
+    >
+      <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} px-5 pt-5`}>
+        {!isCollapsed ? (
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-md">
               <Triangle size={16} fill="currentColor" strokeWidth={0} />
             </div>
-            <span className="text-xl font-bold tracking-tight text-gray-900">留学咩</span>
+            <div className="min-w-0">
+              <div className="truncate text-base font-black tracking-tight text-slate-900">留学咩</div>
+              <div className="truncate text-xs font-medium text-slate-500">留学顾问工作台</div>
+            </div>
           </div>
-        )}
-        {isCollapsed && (
-          <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/20">
+        ) : (
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-md">
             <Triangle size={16} fill="currentColor" strokeWidth={0} />
           </div>
         )}
-        
-        <button 
+      </div>
+
+      {!isCollapsed && (
+        <div className="mx-5 mt-4 rounded-2xl border border-white/70 bg-white/68 px-4 py-3 text-sm shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Workspace</div>
+              <div className="mt-1 text-sm font-semibold text-slate-700">顾问、文书、择导一体化</div>
+            </div>
+            <span className="mac-pill !px-3 !py-1.5 !text-[10px]">Desktop</span>
+          </div>
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className={`px-3 ${isCollapsed ? 'py-4' : 'py-5'}`}>
+          <button
+            type="button"
+            onClick={() => onTabChange('faculty-matcher')}
+            className={`group mac-source-list-item relative flex w-full items-center rounded-[24px] border border-white/75 bg-white/82 shadow-sm transition-all duration-200 hover:bg-white hover:shadow-md ${
+              isCollapsed ? 'justify-center px-3 py-3' : 'gap-3 px-4 py-3.5 text-left'
+            }`}
+            title={isCollapsed ? '快速搜索导师' : ''}
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+              <Search size={18} strokeWidth={2.3} />
+            </div>
+            {!isCollapsed && (
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Search</div>
+                <div className="truncate text-sm font-semibold text-slate-800">快速搜索导师</div>
+              </div>
+            )}
+            {!isCollapsed && (
+              <div className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500">
+                常用入口
+              </div>
+            )}
+            {isCollapsed && (
+              <div className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-xl bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+                快速搜索导师
+              </div>
+            )}
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-1 pb-5">
+          {navGroups.map((group) => (
+            <NavGroup key={group.title} title={group.title} isCollapsed={isCollapsed}>
+              {group.items.map((item) => (
+                <NavItem
+                  key={item.id}
+                  icon={item.icon}
+                  label={item.label}
+                  isActive={activeTab === item.id}
+                  onClick={() => onTabChange(item.id)}
+                  isCollapsed={isCollapsed}
+                />
+              ))}
+            </NavGroup>
+          ))}
+        </div>
+      </div>
+
+      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center">
+        <button
+          type="button"
           onClick={onToggleCollapse}
-          className={`text-gray-400 hover:text-gray-700 transition-colors p-1.5 hover:bg-white/50 rounded-lg ${isCollapsed ? 'absolute bottom-8 left-1/2 -translate-x-1/2' : ''}`}
+          className="pointer-events-auto mr-[-18px] flex h-16 w-9 items-center justify-center rounded-r-2xl rounded-l-xl border border-white/85 bg-white text-slate-500 shadow-lg transition-all duration-200 hover:mr-[-20px] hover:text-slate-800"
+          title={isCollapsed ? '展开导航' : '收起导航'}
         >
-          {isCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          {isCollapsed ? <ChevronRight size={18} strokeWidth={2.8} /> : <ChevronLeft size={18} strokeWidth={2.8} />}
         </button>
       </div>
-
-      {/* Navigation */}
-      <div className="flex-1 overflow-y-auto py-2 custom-scrollbar">
-        <NavGroup title="通用" isCollapsed={isCollapsed}>
-          <NavItem icon={LayoutDashboard} label="总览" isActive={activeTab === 'dashboard'} onClick={() => onTabChange('dashboard')} isCollapsed={isCollapsed} />
-          <NavItem icon={UserSquare} label="客户档案" isActive={activeTab === 'users'} onClick={() => onTabChange('users')} isCollapsed={isCollapsed} />
-          <NavItem icon={FolderOpen} label="我的作品" isActive={activeTab === 'projects'} onClick={() => onTabChange('projects')} isCollapsed={isCollapsed} />
-        </NavGroup>
-
-        <NavGroup title="核心业务：全流程 Agent" isCollapsed={isCollapsed}>
-          <NavItem icon={Wand2} label="文书 Agent" isActive={activeTab === 'agent'} onClick={() => onTabChange('agent')} isCollapsed={isCollapsed} />
-          <NavItem icon={Search} label="学术导师智能检索" isActive={activeTab === 'faculty-matcher'} onClick={() => onTabChange('faculty-matcher')} isCollapsed={isCollapsed} />
-          <NavItem icon={Database} label="导师库" isActive={activeTab === 'faculty-db'} onClick={() => onTabChange('faculty-db')} isCollapsed={isCollapsed} />
-        </NavGroup>
-
-        <NavGroup title="文书专项" isCollapsed={isCollapsed}>
-          <NavItem icon={FileText} label="写 PS" isActive={activeTab === 'ps'} onClick={() => onTabChange('ps')} isCollapsed={isCollapsed} />
-          <NavItem icon={BookOpen} label="命题文书" isActive={activeTab === 'essay'} onClick={() => onTabChange('essay')} isCollapsed={isCollapsed} />
-          <NavItem icon={Mail} label="写推荐信" isActive={activeTab === 'lor'} onClick={() => onTabChange('lor')} isCollapsed={isCollapsed} />
-          <NavItem icon={FileUser} label="写 CV" isActive={activeTab === 'cv'} onClick={() => onTabChange('cv')} isCollapsed={isCollapsed} />
-          <NavItem icon={Edit3} label="自由创作" isActive={activeTab === 'freewrite'} onClick={() => onTabChange('freewrite')} isCollapsed={isCollapsed} />
-        </NavGroup>
-
-        <NavGroup title="工具" isCollapsed={isCollapsed}>
-          <NavItem icon={ShieldCheck} label="降 AI 率" isActive={activeTab === 'ai-shield'} onClick={() => onTabChange('ai-shield')} isCollapsed={isCollapsed} />
-        </NavGroup>
-
-        <NavGroup title="系统" isCollapsed={isCollapsed}>
-          <NavItem icon={Settings} label="账户管理" isActive={activeTab === 'settings'} onClick={() => onTabChange('settings')} isCollapsed={isCollapsed} />
-          <NavItem icon={Share2} label="推广合作" isActive={activeTab === 'share'} onClick={() => onTabChange('share')} isCollapsed={isCollapsed} />
-        </NavGroup>
-      </div>
-    </div>
+    </aside>
   );
 };
 

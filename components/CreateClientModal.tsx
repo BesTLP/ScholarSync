@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Upload, FileUp, Loader2, CheckCircle, Type, FileText, Sparkles, Image as ImageIcon } from 'lucide-react';
 import { parseClientFile } from '../services/geminiService';
+import { readFileForClientParsing } from '../services/clientFileParsing';
 import { Client } from '../types';
 
 interface CreateClientModalProps {
@@ -20,6 +21,7 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const requiresSuccessfulParsing = smartArchive && (Boolean(selectedFile) || pastedText.trim().length > 0);
 
   useEffect(() => {
     if (selectedFile && selectedFile.type.startsWith('image/')) {
@@ -34,6 +36,11 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
   if (!isOpen) return null;
 
   const handleConfirm = () => {
+    if (requiresSuccessfulParsing && !parsedData) {
+      setUploadError('请先完成解析，再创建客户档案。');
+      return;
+    }
+
     if (nickname.trim()) {
       onConfirm(nickname.trim(), parsedData || undefined);
       setNickname('');
@@ -52,32 +59,16 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
     setIsUploading(true);
     setUploadError(null);
     try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const result = e.target?.result as string;
-        if (result) {
-          try {
-            const data = await parseClientFile(result, selectedFile.type);
-            setParsedData(data);
-            if (data.name && !nickname) {
-              setNickname(data.name);
-            }
-          } catch (err) {
-            console.error("Parsing failed", err);
-            setUploadError("解析失败，请重试");
-          } finally {
-            setIsUploading(false);
-          }
-        }
-      };
-      reader.onerror = () => {
-        setUploadError("读取文件失败");
-        setIsUploading(false);
-      };
-      reader.readAsDataURL(selectedFile);
+      const parseInput = await readFileForClientParsing(selectedFile);
+      const data = await parseClientFile(parseInput.data, parseInput.mimeType);
+      setParsedData(data);
+      if (data.name && !nickname) {
+        setNickname(data.name);
+      }
     } catch (e) {
       console.error(e);
-      setUploadError("上传出错");
+      setUploadError(e instanceof Error ? e.message : '文件解析失败，请重试。');
+    } finally {
       setIsUploading(false);
     }
   };
@@ -353,9 +344,9 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({ isOpen, onClose, 
           </button>
           <button 
             onClick={handleConfirm}
-            disabled={isUploading || !nickname.trim()}
+            disabled={isUploading || !nickname.trim() || (requiresSuccessfulParsing && !parsedData)}
             className={`px-8 py-3 rounded-2xl text-sm font-bold transition-all shadow-md active:scale-95
-              ${isUploading || !nickname.trim() 
+              ${isUploading || !nickname.trim() || (requiresSuccessfulParsing && !parsedData)
                 ? 'bg-gray-200/50 text-gray-400 cursor-not-allowed shadow-none' 
                 : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-blue-500/20 hover:shadow-lg'}
             `}

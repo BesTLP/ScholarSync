@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { 
+import {
   Wand2, 
   UploadCloud, 
   Users, 
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Client } from '../types';
 import { parseClientFile } from '../services/geminiService';
+import { readFileForClientParsing } from '../services/clientFileParsing';
 
 interface EssayAgentEntryProps {
   clients: Client[];
@@ -23,6 +24,7 @@ const EssayAgentEntry: React.FC<EssayAgentEntryProps> = ({ clients, onAddClient,
   const [activeTab, setActiveTab] = useState<'upload' | 'select'>('upload');
   const [isUploading, setIsUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -30,29 +32,18 @@ const EssayAgentEntry: React.FC<EssayAgentEntryProps> = ({ clients, onAddClient,
     if (!file) return;
 
     setIsUploading(true);
-    
+    setUploadError(null);
+
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const result = event.target?.result as string;
-        if (result) {
-          try {
-            const data = await parseClientFile(result, file.type);
-            const clientName = data.name || file.name.split('.')[0] || '新上传学生';
-            onAddClient(clientName, data);
-            setActiveTab('select');
-          } catch (err) {
-            console.error("Parsing failed", err);
-            onAddClient(file.name.split('.')[0]);
-            setActiveTab('select');
-          } finally {
-            setIsUploading(false);
-          }
-        }
-      };
-      reader.readAsDataURL(file);
+      const parseInput = await readFileForClientParsing(file);
+      const data = await parseClientFile(parseInput.data, parseInput.mimeType);
+      const clientName = data.name || file.name.split('.')[0] || '新上传学生';
+      onAddClient(clientName, data);
+      setActiveTab('select');
     } catch (error) {
       console.error(error);
+      setUploadError(error instanceof Error ? error.message : '文件解析失败，请先检查文件内容。');
+    } finally {
       setIsUploading(false);
     }
   };
@@ -207,6 +198,11 @@ const EssayAgentEntry: React.FC<EssayAgentEntryProps> = ({ clients, onAddClient,
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+            {uploadError && (
+              <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+                {uploadError}
               </div>
             )}
           </div>

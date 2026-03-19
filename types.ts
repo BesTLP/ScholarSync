@@ -1,71 +1,159 @@
-
 export interface MatchReasoning {
-  locationCheck: string;      // Country/Region verification
-  universityCheck: string;    // Institution verification
-  departmentCheck: string;    // Department verification
-  researchFit: string;        // Academic background alignment
-  positionCheck: string;      // Title/Position verification
-  activityCheck: string;      // Recent activity evaluation
-  reputationCheck: string;    // Overall standing/quality assessment
+  locationCheck: string;
+  universityCheck: string;
+  departmentCheck: string;
+  researchFit: string;
+  positionCheck: string;
+  activityCheck: string;
+  reputationCheck: string;
 }
 
 export interface SourceData {
-    value: string;
-    sourceUrl: string;
+  value: string;
+  sourceUrl: string;
+}
+
+export type MatchSource = 'local' | 'web' | 'merged';
+export type SourceMode = 'local' | 'web';
+export type DegreeType = 'phd' | 'master' | 'unspecified';
+export type RecommendationOrigin = 'student-detail' | 'matcher' | 'faculty-db' | 'manual';
+
+export interface MentorEvaluationSnapshot {
+  score: number;
+  band: 'high' | 'medium' | 'low';
+  summary: string;
+  reasons: string[];
+  updatedAt: string;
+  sourceBreakdown: {
+    researchFit: number;
+    targetFit: number;
+    admissionFit: number;
+    seniorityFit: number;
+    dataQuality: number;
+  };
 }
 
 export interface FacultyMember {
   name: string;
   title: string;
-  university: string;         // 学校名称 (中)
-  universityEn?: string;       // 学校名称 (英)
-  department?: string;        // 院系
-  programName?: string;       // 专业名称 (中)
-  programNameEn?: string;     // 专业名称 (英)
+  university: string;
+  school?: string;
+  department?: string;
   matchScore: number;
-  researchAreas: string[];    // 导师研究方向
+  researchAreas: string[];
   alignmentDetails: string;
-  activitySummary: string;    
-  recentActivities: string[]; // 导师研究方向 (论文/项目)
+  activitySummary: string;
+  recentActivities: string[];
   isActive: boolean;
-  profileUrl?: string;        // 导师官网链接
-  photoUrl?: string;          
-  email?: string;             // 导师邮箱
-  
-  // Admission & Data Fields with Source
-  qsRanking?: string;         // 2026QS综合排名
+  profileUrl?: string;
+  photoUrl?: string;
+  email?: string;
+  qsRanking?: string;
   qsRankingData?: SourceData;
-  deadlineData?: SourceData;  // 申请截止日期
-  applicationReqsData?: SourceData; // 申请要求及材料
-  rpReqsData?: SourceData;    // RP字数要求
-  tuitionData?: SourceData;   // 学费
-  scholarshipData?: SourceData; // 奖学金项目
-  
-  programUrl?: string;        // 专业链接
-  universityUrl?: string;     // 学校官网
-  
-  recommendationReason?: string; // 推荐理由
-
+  deadlineData?: SourceData;
+  applicationReqsData?: SourceData;
+  rpReqsData?: SourceData;
+  tuitionData?: SourceData;
+  scholarshipData?: SourceData;
+  programUrl?: string;
+  universityUrl?: string;
   matchReasoning: MatchReasoning;
+  matchSource?: MatchSource;
+  evidenceUrls?: string[];
+  evaluation?: MentorEvaluationSnapshot;
+  dimensionTags?: string[];
+}
+
+export interface FacultyProject {
+  id: string;
+  programName: string;
+  programNameZh?: string;
+  programNameEn?: string;
+  programUrl?: string;
+  deadlineRaw?: string;
+  deadlineSourceUrls?: string[];
+  applicationRequirementsRaw?: string;
+  applicationRequirementsSourceUrls?: string[];
+  rpRequirementsRaw?: string;
+  rpRequirementsSourceUrls?: string[];
+  tuitionRaw?: string;
+  tuitionSourceUrls?: string[];
+  scholarshipRaw?: string;
+  scholarshipSourceUrls?: string[];
+  recommendationReason?: string;
+  sourceWorkbook?: string;
+  sourceSheet?: string;
+  sourceRowIndex?: number;
+  rawRow?: Record<string, string>;
+  mentorTextRaw?: string;
+  emailCellRaw?: string;
+}
+
+export interface FacultyRecordLegacy {
+  country?: string;
+  subRegion?: string;
+  regionPath?: string[];
+  classificationPath?: string[];
+  classificationNote?: string;
+}
+
+export interface FacultyImportRowResult {
+  rowIndex: number;
+  status: 'parsed' | 'skipped' | 'failed';
+  message: string;
+  rawRow: Record<string, string>;
+  facultyKey?: string;
+}
+
+export interface FacultyImportSummary {
+  workbookName: string;
+  sheetName: string;
+  totalRows: number;
+  processedRows: number;
+  parsedRows: number;
+  skippedRows: number;
+  failedRows: number;
+  createdFacultyCount: number;
+  mergedFacultyCount: number;
+  appendedProjectCount: number;
+  messages?: string[];
 }
 
 export interface FacultyRecord extends FacultyMember {
-  // ===== 数据库管理字段 =====
-  id: string;                    // 唯一ID (crypto.randomUUID())
-  country: string;               // 国家/地区分类 (如"美国"、"英国"、"中国")
-  subRegion?: string;            // 二级地区 (如"北京"、"加州"、"伦敦")
-  regionPath?: string[];         // 地区路径，如 ["中国", "陕西", "西安"]
-  fieldCategory: string;         // 专业/学科分类 (如"计算机科学"、"机械工程")
-  subFieldCategory?: string;     // 二级分类 (如"人工智能"、"机器人学")
-  classificationPath?: string[]; // 多级路径，如 ["工程与技术","计算机科学","人工智能","机器学习"]
+  id: string;
+  country: string;
+  provinceState?: string;
+  city?: string;
+  subRegion?: string;
+  regionPath?: string[];
+  universityEnglish?: string;
+  programNameZh?: string;
+  programNameEn?: string;
+  deadlineSourceUrls?: string[];
+  applicationRequirementsSourceUrls?: string[];
+  rpRequirementsSourceUrls?: string[];
+  tuitionSourceUrls?: string[];
+  scholarshipSourceUrls?: string[];
+  fieldCategory: string;
+  subFieldCategory?: string;
+  classificationPath?: string[];
   classificationSource?: 'auto' | 'manual' | 'hybrid';
-  classificationNote?: string;   // 手动分类备注/依据
-  customTags?: string[];         // 用户自定义标签 (如"已联系"、"回复快"、"套磁优先")
-  addedAt: string;               // 添加到数据库的时间 (ISO格式)
-  updatedAt: string;             // 最后修改时间
-  source: 'search' | 'manual';  // 来源：搜索匹配添加 or 手动录入
-  notes?: string;                // 用户备注
-  linkedClientIds?: string[];    // 关联的客户ID列表（推荐给了哪些学生）
+  classificationNote?: string;
+  normalizedName: string;
+  normalizedUniversity: string;
+  customTags?: string[];
+  addedAt: string;
+  updatedAt: string;
+  source: 'search' | 'manual' | 'import';
+  notes?: string;
+  linkedClientIds?: string[];
+  projects: FacultyProject[];
+  legacy?: FacultyRecordLegacy;
+  raw?: {
+    sourceWorkbook?: string;
+    sourceSheet?: string;
+    importedRows?: Array<Record<string, string>>;
+  };
 }
 
 export interface TargetOption {
@@ -74,10 +162,83 @@ export interface TargetOption {
   count: number;
 }
 
+export interface MatcherSearchTarget {
+  id: string;
+  country?: string;
+  university?: string;
+  school?: string;
+  department?: string;
+  major?: string;
+  count?: number;
+}
+
+export interface ClientSelectionProfile {
+  countries: string[];
+  universities: string[];
+  departments: string[];
+  majors: string[];
+  degreeType?: DegreeType;
+  majorA?: string;
+  majorB?: string;
+  crossDiscipline?: boolean;
+  officialLinks: string[];
+  targetPosition?: string;
+  entryYear?: string;
+  selectionCount?: number;
+  selectionType?: string;
+  selectionDeadline?: string;
+  scholarshipRequirement?: string;
+  exclusions?: string;
+  rankingPreference?: string;
+  specialRequirements?: string;
+  businessCoordinator?: string;
+  hasRP?: boolean;
+  hasCV?: boolean;
+  hasPublications?: boolean;
+  rpTopic?: string;
+  avoidPreviousMentors?: string;
+}
+
+export interface MatcherSearchFilters {
+  sourceModes: SourceMode[];
+  targets: MatcherSearchTarget[];
+  degreeType?: DegreeType;
+  majorA?: string;
+  majorB?: string;
+  crossDiscipline?: boolean;
+  officialLinks: string[];
+  profileSummary?: string;
+  manualNotes?: string;
+  scholarshipRequirement?: string;
+  exclusions?: string;
+  rankingPreference?: string;
+  specialRequirements?: string;
+  targetPosition?: string;
+  entryYear?: string;
+  businessCoordinator?: string;
+  selectionType?: string;
+  selectionCount?: number;
+  selectionDeadline?: string;
+  hasRP?: boolean;
+  hasCV?: boolean;
+  hasPublications?: boolean;
+  rpTopic?: string;
+  avoidPreviousMentors?: string;
+}
+
+export interface MentorRecommendation {
+  facultyId: string;
+  addedAt: string;
+  addedFrom: RecommendationOrigin;
+  sourceModes: SourceMode[];
+  evaluation?: MentorEvaluationSnapshot;
+  notes?: string;
+}
+
 export enum ImageSize {
-  Size_1K = "1K",
-  Size_2K = "2K",
-  Size_4K = "4K",
+  Size_1K = '1K',
+  Size_2K = '2K',
+  Size_4K = '4K',
 }
 
 export interface ChatMessage {
@@ -133,11 +294,11 @@ export interface ClientDocument {
 export interface ClientEvent {
   id: string;
   clientId: string;
-  title: string;            // 事件标题，如 "帝国理工 DDL"
-  date: string;             // ISO 日期 YYYY-MM-DD
-  time?: string;            // 可选时间 HH:mm
+  title: string;
+  date: string;
+  time?: string;
   type: 'deadline' | 'interview' | 'submission' | 'meeting' | 'reminder' | 'other';
-  description?: string;     // 备注
+  description?: string;
   priority: 'high' | 'medium' | 'low';
   completed: boolean;
 }
@@ -179,26 +340,26 @@ export interface Client {
     expiry: string;
   }>;
   avatarUrl?: string;
-  // ===== 择导需求信息 =====
-  targetCountries?: string;            // 意向国家，如 "美国、澳洲"
-  targetUniversities?: string;         // 具体意向院校描述，如 "墨尔本大学、悉尼大学；US News 30-50"
-  targetDepartment?: string;           // 专业范围，如 "public finance, 公共经济学, 税收政策"
-  entryYear?: string;                  // 入学年份，如 "27fall"、"2026年"
-  scholarshipRequirement?: string;     // 奖学金需求，如 "全奖"、"必须要奖学金"
-  exclusions?: string;                 // 排除列表，如 "避开爱丁堡大学"
-  rankingPreference?: string;          // 排名偏好，如 "QS前100, US News前50"
-  acceptCrossDiscipline?: boolean;     // 能否接受交叉学科
-  specialRequirements?: string;        // 特殊需求，如 "mphil和phd录取要求分开写"
-  hasRP?: boolean;                     // 是否有RP
-  hasCV?: boolean;                     // 是否有CV
-  hasPublications?: boolean;           // 是否有期刊发表
-  rpTopic?: string;                    // RP题目
-  // ===== 业务信息（内部用，不给学生看） =====
-  businessCoordinator?: string;        // 沟通协调专员，如 "Jennifer"
-  selectionType?: string;              // 择导类型，如 "第1轮择导"
-  selectionCount?: number;             // 择导个数
-  selectionDeadline?: string;          // DDL，如 "11.28"
-  avoidPreviousMentors?: string;       // 是否避开之前导师及详情
+  targetCountries?: string;
+  targetUniversities?: string;
+  targetDepartment?: string;
+  entryYear?: string;
+  scholarshipRequirement?: string;
+  exclusions?: string;
+  rankingPreference?: string;
+  acceptCrossDiscipline?: boolean;
+  specialRequirements?: string;
+  hasRP?: boolean;
+  hasCV?: boolean;
+  hasPublications?: boolean;
+  rpTopic?: string;
+  businessCoordinator?: string;
+  selectionType?: string;
+  selectionCount?: number;
+  selectionDeadline?: string;
+  avoidPreviousMentors?: string;
   linkedFacultyIds?: string[];
+  mentorRecommendations?: MentorRecommendation[];
+  selectionProfile?: ClientSelectionProfile;
   events?: ClientEvent[];
 }

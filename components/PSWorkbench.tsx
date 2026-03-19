@@ -45,6 +45,8 @@ interface SidebarConfigProps {
   onGenerateOutline: () => void;
   onGenerateContent: () => void;
   canGenerateContent: boolean;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 const SidebarConfig: React.FC<SidebarConfigProps> = ({ 
@@ -65,10 +67,23 @@ const SidebarConfig: React.FC<SidebarConfigProps> = ({
   isGeneratingOutline,
   onGenerateOutline,
   onGenerateContent,
-  canGenerateContent
+  canGenerateContent,
+  isCollapsed,
+  onToggleCollapse
 }) => {
   return (
-    <div className="w-[320px] bg-white border-r border-gray-100 flex flex-col h-full relative">
+    <div className={`${isCollapsed ? 'w-[72px]' : 'w-[320px]'} bg-white border-r border-gray-100 flex flex-col h-full relative transition-all duration-300 overflow-visible`}>
+      <div className={`border-b border-gray-100 p-4 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'}`}>
+        {!isCollapsed && <h3 className="text-base font-bold text-gray-900">PS</h3>}
+      </div>
+      {isCollapsed ? (
+        <div className="flex flex-1 items-center justify-center p-3">
+          <button onClick={onToggleCollapse} className="p-3 rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100">
+            <SearchIcon size={18} />
+          </button>
+        </div>
+      ) : (
+      <>
       <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar pb-32">
         {/* Client Select */}
         <div className="space-y-2">
@@ -207,6 +222,17 @@ const SidebarConfig: React.FC<SidebarConfigProps> = ({
         </button>
         <p className="text-[10px] text-gray-400 text-center">需要至少 3 个大纲段落</p>
       </div>
+      </>
+      )}
+      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center">
+        <button
+          onClick={onToggleCollapse}
+          className="pointer-events-auto mr-[-18px] flex h-16 w-9 items-center justify-center rounded-r-2xl rounded-l-xl border border-gray-200 bg-white text-gray-500 shadow-lg transition-all hover:text-gray-800"
+          title={isCollapsed ? '展开侧栏' : '收起侧栏'}
+        >
+          {isCollapsed ? <ChevronRight size={18} strokeWidth={2.8} /> : <ChevronLeft size={18} strokeWidth={2.8} />}
+        </button>
+      </div>
     </div>
   );
 };
@@ -329,7 +355,8 @@ interface PSWorkbenchProps {
 }
 
 const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, onSaveDocument, initialDocument, onBack, initialClientId }) => {
-  const [selectedClientId, setSelectedClientId] = useState(initialClientId || '');
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [selectedClientId, setSelectedClientId] = useState(initialClientId || '');
   const [targetUni, setTargetUni] = useState('');
   const [degree, setDegree] = useState('Master');
   const [major, setMajor] = useState('Computer Science');
@@ -576,6 +603,8 @@ const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, on
         onGenerateOutline={handleGenerateOutline}
         onGenerateContent={handleGenerateContent}
         canGenerateContent={paragraphs.length >= 3 && !!selectedClientId}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
       />
       <OutlineEditor paragraphs={paragraphs} setParagraphs={setParagraphs} />
     </div>

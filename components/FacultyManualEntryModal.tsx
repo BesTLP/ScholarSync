@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { X, Save, User, Building, GraduationCap, Mail, Globe, MapPin, BookOpen, Tag } from 'lucide-react';
-import { FacultyMember, FacultyRecord } from '../types';
+﻿import React, { useMemo, useState } from 'react';
+import { Building2, Globe, Mail, MapPin, Save, User, X } from 'lucide-react';
+import { FacultyMember, FacultyProject, FacultyRecord } from '../types';
+import { createEmptyMatchReasoning } from '../services/facultyNormalization';
 
 interface FacultyManualEntryModalProps {
   isOpen: boolean;
@@ -8,365 +9,357 @@ interface FacultyManualEntryModalProps {
   onSave: (faculty: FacultyMember, country: string, fieldCategory: string, extra?: Partial<FacultyRecord>) => void;
 }
 
-const InputField = ({ label, icon: Icon, value, onChange, placeholder, required = false }: { label: string; icon?: any; value: string; onChange: (val: string) => void; placeholder?: string; required?: boolean }) => (
-  <div className="space-y-1.5">
-    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center">
-      {Icon && <Icon size={12} className="mr-1.5" />}
-      {label}
-      {required && <span className="text-red-500 ml-1">*</span>}
+function InputField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  required?: boolean;
+}) {
+  return (
+    <label className="space-y-1.5 block">
+      <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+        {label}
+        {required && <span className="ml-1 text-rose-500">*</span>}
+      </div>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+      />
     </label>
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
-    />
-  </div>
-);
+  );
+}
+
+const initialForm = {
+  name: '',
+  title: '',
+  university: '',
+  universityUrl: '',
+  school: '',
+  department: '',
+  email: '',
+  profileUrl: '',
+  photoUrl: '',
+  country: '',
+  provinceState: '',
+  city: '',
+  fieldCategory: '',
+  subFieldCategory: '',
+  researchAreas: '',
+  classificationNote: '',
+  programName: '',
+  programUrl: '',
+  deadlineRaw: '',
+  deadlineSourceUrls: '',
+  applicationRequirementsRaw: '',
+  applicationRequirementsSourceUrls: '',
+  rpRequirementsRaw: '',
+  rpRequirementsSourceUrls: '',
+  tuitionRaw: '',
+  tuitionSourceUrls: '',
+  scholarshipRaw: '',
+  scholarshipSourceUrls: '',
+  recommendationReason: '',
+};
 
 const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpen, onClose, onSave }) => {
-  const [form, setForm] = useState({
-    name: '',
-    title: '',
-    university: '',
-    universityEn: '',
-    qsRanking: '',
-    deadline: '',
-    department: '',
-    programNameEn: '',
-    programUrl: '',
-    applicationReqs: '',
-    rpReqs: '',
-    researchAreas: '',
-    alignmentDetails: '',
-    recommendationReason: '',
-    email: '',
-    profileUrl: '',
-    tuition: '',
-    scholarship: '',
-    country: '',
-    fieldCategory: '',
-    subFieldCategory: '',
-    subRegion: '',
-    regionPath: '',
-    classificationPath: '',
-    classificationNote: '',
-    photoUrl: ''
-  });
+  const [form, setForm] = useState(initialForm);
+
+  const disabled = useMemo(() => !form.name.trim() || !form.university.trim(), [form.name, form.university]);
 
   if (!isOpen) return null;
 
+  const update = (key: keyof typeof initialForm, value: string) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
   const handleSave = () => {
-    if (!form.name || !form.university) {
-      alert('请填写姓名和学校');
+    if (disabled) {
+      window.alert('请至少填写导师姓名和大学名称。');
       return;
     }
 
-    const newFaculty: FacultyMember = {
-      name: form.name,
-      university: form.university,
-      universityEn: form.universityEn,
-      department: form.department,
-      programName: form.department, // Using department as programName for manual entry
-      programNameEn: form.programNameEn,
-      title: form.title,
-      email: form.email,
-      profileUrl: form.profileUrl,
-      photoUrl: form.photoUrl,
-      programUrl: form.programUrl,
-      qsRanking: form.qsRanking,
-      deadlineData: { value: form.deadline, sourceUrl: '' },
-      applicationReqsData: { value: form.applicationReqs, sourceUrl: '' },
-      rpReqsData: { value: form.rpReqs, sourceUrl: '' },
-      tuitionData: { value: form.tuition, sourceUrl: '' },
-      scholarshipData: { value: form.scholarship, sourceUrl: '' },
-      researchAreas: form.researchAreas.split(/[,，]/).map(s => s.trim()).filter(Boolean),
-      recentActivities: [],
-      activitySummary: '',
-      isActive: true,
+    const researchAreas = form.researchAreas
+      .split(/[\n,;，；、]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    const faculty: FacultyMember = {
+      name: form.name.trim(),
+      title: form.title.trim() || '未知职称',
+      university: form.university.trim(),
+      school: form.school.trim(),
+      department: form.department.trim(),
       matchScore: 0,
-      alignmentDetails: form.alignmentDetails,
-      recommendationReason: form.recommendationReason,
-      matchReasoning: {
-        locationCheck: '',
-        universityCheck: '',
-        departmentCheck: '',
-        positionCheck: '',
-        activityCheck: '',
-        reputationCheck: '',
-        researchFit: ''
-      }
-    };
-
-    const extra: Partial<FacultyRecord> = {
-      subFieldCategory: form.subFieldCategory,
-      subRegion: form.subRegion,
-      regionPath: form.regionPath.split(/[>|/]/).map(s => s.trim()).filter(Boolean),
-      classificationPath: form.classificationPath.split(/[>|/]/).map(s => s.trim()).filter(Boolean),
-      classificationNote: form.classificationNote,
-      classificationSource: 'manual'
-    };
-
-    onSave(newFaculty, form.country || '未分类', form.fieldCategory || '未分类', extra);
-    onClose();
-    setForm({
-      name: '',
-      title: '',
-      university: '',
-      universityEn: '',
-      qsRanking: '',
-      deadline: '',
-      department: '',
-      programNameEn: '',
-      programUrl: '',
-      applicationReqs: '',
-      rpReqs: '',
-      researchAreas: '',
+      researchAreas,
       alignmentDetails: '',
-      recommendationReason: '',
-      email: '',
-      profileUrl: '',
-      tuition: '',
-      scholarship: '',
-      country: '',
-      fieldCategory: '',
-      subFieldCategory: '',
-      subRegion: '',
-      regionPath: '',
-      classificationPath: '',
-      classificationNote: '',
-      photoUrl: ''
+      activitySummary: '',
+      recentActivities: [],
+      isActive: true,
+      profileUrl: form.profileUrl.trim(),
+      photoUrl: form.photoUrl.trim(),
+      email: form.email.trim(),
+      matchReasoning: createEmptyMatchReasoning(),
+    };
+
+    const parseUrlList = (value: string) =>
+      value
+        .split(/[\n,;，；]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    const shouldCreateProject =
+      Boolean(form.programName.trim()) ||
+      Boolean(form.programUrl.trim()) ||
+      Boolean(form.deadlineRaw.trim()) ||
+      Boolean(form.applicationRequirementsRaw.trim()) ||
+      Boolean(form.rpRequirementsRaw.trim()) ||
+      Boolean(form.tuitionRaw.trim()) ||
+      Boolean(form.scholarshipRaw.trim()) ||
+      Boolean(form.recommendationReason.trim());
+
+    const projects: FacultyProject[] = shouldCreateProject
+      ? [
+          {
+            id: crypto.randomUUID(),
+            programName: form.programName.trim() || '未命名项目',
+            programUrl: form.programUrl.trim() || undefined,
+            deadlineRaw: form.deadlineRaw.trim() || undefined,
+            deadlineSourceUrls: parseUrlList(form.deadlineSourceUrls),
+            applicationRequirementsRaw: form.applicationRequirementsRaw.trim() || undefined,
+            applicationRequirementsSourceUrls: parseUrlList(form.applicationRequirementsSourceUrls),
+            rpRequirementsRaw: form.rpRequirementsRaw.trim() || undefined,
+            rpRequirementsSourceUrls: parseUrlList(form.rpRequirementsSourceUrls),
+            tuitionRaw: form.tuitionRaw.trim() || undefined,
+            tuitionSourceUrls: parseUrlList(form.tuitionSourceUrls),
+            scholarshipRaw: form.scholarshipRaw.trim() || undefined,
+            scholarshipSourceUrls: parseUrlList(form.scholarshipSourceUrls),
+            recommendationReason: form.recommendationReason.trim() || undefined,
+          },
+        ]
+      : [];
+
+    onSave(faculty, form.country.trim(), form.fieldCategory.trim(), {
+      source: 'manual',
+      universityUrl: form.universityUrl.trim(),
+      school: form.school.trim(),
+      department: form.department.trim(),
+      provinceState: form.provinceState.trim(),
+      city: form.city.trim(),
+      subFieldCategory: form.subFieldCategory.trim(),
+      classificationNote: form.classificationNote.trim(),
+      classificationSource: 'manual',
+      projects,
     });
+
+    setForm(initialForm);
+    onClose();
   };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-xl" onClick={onClose} />
-      <div className="relative glass w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 border border-white/50">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/50 bg-white/40 backdrop-blur-sm">
-          <h3 className="text-lg font-bold text-gray-900 tracking-tight">手动录入导师信息</h3>
-          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/60 rounded-xl transition-all active:scale-95">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-3xl rounded-3xl border border-white/50 bg-white/90 shadow-2xl backdrop-blur-md">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+          <div>
+            <div className="text-lg font-black text-slate-900">手动录入导师</div>
+            <div className="text-sm text-slate-500">直接按国家 / 州省 / 城市 / 大学 / 学院 / 系维护规范字段。</div>
+          </div>
+          <button onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
             <X size={20} />
           </button>
         </div>
 
-        {/* Form Content */}
-        <div className="p-8 max-h-[70vh] overflow-y-auto custom-scrollbar bg-white/20 backdrop-blur-sm">
-          <div className="grid grid-cols-2 gap-6">
-            <InputField 
-              label="导师姓名" 
-              icon={User} 
-              value={form.name} 
-              onChange={v => setForm({...form, name: v})} 
-              placeholder="例如: Alice Johnson" 
-              required 
-            />
-            <InputField 
-              label="职称" 
-              icon={GraduationCap} 
-              value={form.title} 
-              onChange={v => setForm({...form, title: v})} 
-              placeholder="例如: Professor" 
-            />
-            <InputField 
-              label="学校名称 (中文)" 
-              icon={Building} 
-              value={form.university} 
-              onChange={v => setForm({...form, university: v})} 
-              placeholder="例如: 斯坦福大学" 
-              required 
-            />
-            <InputField 
-              label="学校名称 (英文)" 
-              icon={Building} 
-              value={form.universityEn} 
-              onChange={v => setForm({...form, universityEn: v})} 
-              placeholder="例如: Stanford University" 
-            />
-            <InputField 
-              label="2026QS综合排名" 
-              icon={BookOpen} 
-              value={form.qsRanking} 
-              onChange={v => setForm({...form, qsRanking: v})} 
-              placeholder="例如: 1" 
-            />
-            <InputField 
-              label="申请截止日期" 
-              icon={BookOpen} 
-              value={form.deadline} 
-              onChange={v => setForm({...form, deadline: v})} 
-              placeholder="例如: 2026-12-01" 
-            />
-            <InputField 
-              label="专业名称 (中文)" 
-              icon={Building} 
-              value={form.department} 
-              onChange={v => setForm({...form, department: v})} 
-              placeholder="例如: 计算机科学" 
-            />
-            <InputField 
-              label="专业名称 (英文)" 
-              icon={Building} 
-              value={form.programNameEn} 
-              onChange={v => setForm({...form, programNameEn: v})} 
-              placeholder="例如: Computer Science" 
-            />
-            <InputField 
-              label="专业链接" 
-              icon={Globe} 
-              value={form.programUrl} 
-              onChange={v => setForm({...form, programUrl: v})} 
-              placeholder="https://..." 
-            />
-            <InputField 
-              label="申请要求及材料" 
-              icon={BookOpen} 
-              value={form.applicationReqs} 
-              onChange={v => setForm({...form, applicationReqs: v})} 
-              placeholder="例如: CV, PS, 3 Letters of Recommendation" 
-            />
-            <InputField 
-              label="RP字数要求" 
-              icon={BookOpen} 
-              value={form.rpReqs} 
-              onChange={v => setForm({...form, rpReqs: v})} 
-              placeholder="例如: 2000 words" 
-            />
-            <InputField 
-              label="导师研究方向（论文）" 
-              icon={Tag} 
-              value={form.researchAreas} 
-              onChange={v => setForm({...form, researchAreas: v})} 
-              placeholder="例如: AI, Machine Learning, Computer Vision" 
-            />
-            <InputField 
-              label="匹配深度解析" 
-              icon={BookOpen} 
-              value={form.alignmentDetails} 
-              onChange={v => setForm({...form, alignmentDetails: v})} 
-              placeholder="例如: 研究方向高度匹配" 
-            />
-            <InputField 
-              label="推荐理由" 
-              icon={BookOpen} 
-              value={form.recommendationReason} 
-              onChange={v => setForm({...form, recommendationReason: v})} 
-              placeholder="例如: 领域顶尖专家，资源丰富" 
-            />
-            <InputField 
-              label="导师邮箱" 
-              icon={Mail} 
-              value={form.email} 
-              onChange={v => setForm({...form, email: v})} 
-              placeholder="例如: alice@stanford.edu" 
-            />
-            <InputField 
-              label="导师官网链接" 
-              icon={Globe} 
-              value={form.profileUrl} 
-              onChange={v => setForm({...form, profileUrl: v})} 
-              placeholder="https://..." 
-            />
-            <InputField 
-              label="学费" 
-              icon={BookOpen} 
-              value={form.tuition} 
-              onChange={v => setForm({...form, tuition: v})} 
-              placeholder="例如: $50,000/year" 
-            />
-            <InputField 
-              label="奖学金项目" 
-              icon={BookOpen} 
-              value={form.scholarship} 
-              onChange={v => setForm({...form, scholarship: v})} 
-              placeholder="例如: Full funding available" 
-            />
-            <div className="col-span-2 border-t border-gray-200 pt-4 mt-2">
-              <h4 className="text-sm font-bold text-gray-700 mb-4">分类与系统信息 (可选)</h4>
-              <div className="grid grid-cols-2 gap-6">
-                <InputField 
-                  label="国家 / 地区" 
-                  icon={MapPin} 
-                  value={form.country} 
-                  onChange={v => setForm({...form, country: v})} 
-                  placeholder="例如: 美国" 
+        <div className="max-h-[75vh] overflow-y-auto px-6 py-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <InputField label="导师姓名" value={form.name} onChange={(value) => update('name', value)} placeholder="例如：Emily Wilson" required />
+            <InputField label="职称" value={form.title} onChange={(value) => update('title', value)} placeholder="例如：Associate Professor" />
+            <InputField label="大学" value={form.university} onChange={(value) => update('university', value)} placeholder="例如：The University of Melbourne" required />
+            <InputField label="院校官网" value={form.universityUrl} onChange={(value) => update('universityUrl', value)} placeholder="https://..." />
+            <InputField label="学院 / School" value={form.school} onChange={(value) => update('school', value)} placeholder="例如：Fine Arts and Music" />
+            <InputField label="系 / Department" value={form.department} onChange={(value) => update('department', value)} placeholder="例如：Music" />
+            <InputField label="邮箱" value={form.email} onChange={(value) => update('email', value)} placeholder="例如：name@university.edu" />
+            <InputField label="国家" value={form.country} onChange={(value) => update('country', value)} placeholder="例如：中国 / 美国 / 澳大利亚" />
+            <InputField label="州 / 省" value={form.provinceState} onChange={(value) => update('provinceState', value)} placeholder="例如：北京 / 纽约州" />
+            <InputField label="城市" value={form.city} onChange={(value) => update('city', value)} placeholder="例如：北京 / 罗彻斯特" />
+            <InputField label="一级学科" value={form.fieldCategory} onChange={(value) => update('fieldCategory', value)} placeholder="例如：计算机科学 / 音乐" />
+            <InputField label="二级学科" value={form.subFieldCategory} onChange={(value) => update('subFieldCategory', value)} placeholder="例如：人工智能 / 音乐学" />
+            <InputField label="导师主页" value={form.profileUrl} onChange={(value) => update('profileUrl', value)} placeholder="https://..." />
+            <div className="md:col-span-2">
+              <InputField label="头像 URL" value={form.photoUrl} onChange={(value) => update('photoUrl', value)} placeholder="https://..." />
+            </div>
+            <div className="md:col-span-2">
+              <label className="space-y-1.5 block">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">研究方向</div>
+                <textarea
+                  value={form.researchAreas}
+                  onChange={(event) => update('researchAreas', event.target.value)}
+                  placeholder="用逗号、分号或换行分隔多个研究方向"
+                  className="min-h-[96px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 />
-                <InputField 
-                  label="二级地区 (如: 北京)" 
-                  icon={MapPin} 
-                  value={form.subRegion} 
-                  onChange={v => setForm({...form, subRegion: v})} 
-                  placeholder="例如: 北京" 
+              </label>
+            </div>
+            <div className="md:col-span-2">
+              <label className="space-y-1.5 block">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">分类备注</div>
+                <textarea
+                  value={form.classificationNote}
+                  onChange={(event) => update('classificationNote', event.target.value)}
+                  placeholder="记录人工判断依据，便于后续校验。"
+                  className="min-h-[96px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 />
-                <InputField 
-                  label="地区路径 (用 &gt; 分隔)" 
-                  icon={MapPin} 
-                  value={form.regionPath} 
-                  onChange={v => setForm({...form, regionPath: v})} 
-                  placeholder="例如: 中国 > 陕西 > 西安" 
-                />
-                <InputField 
-                  label="学科领域 (一级)" 
-                  icon={BookOpen} 
-                  value={form.fieldCategory} 
-                  onChange={v => setForm({...form, fieldCategory: v})} 
-                  placeholder="例如: 计算机科学" 
-                />
-                <InputField 
-                  label="二级分类" 
-                  icon={Tag} 
-                  value={form.subFieldCategory} 
-                  onChange={v => setForm({...form, subFieldCategory: v})} 
-                  placeholder="例如: 人工智能" 
-                />
-                <InputField 
-                  label="分类路径 (用 &gt; 分隔)" 
-                  icon={Tag} 
-                  value={form.classificationPath} 
-                  onChange={v => setForm({...form, classificationPath: v})} 
-                  placeholder="例如: 工程与技术 > 计算机科学 > 人工智能" 
-                />
-                <div className="col-span-2">
-                  <InputField 
-                    label="分类备注" 
-                    icon={BookOpen} 
-                    value={form.classificationNote} 
-                    onChange={v => setForm({...form, classificationNote: v})} 
-                    placeholder="说明分类依据..." 
-                  />
+              </label>
+            </div>
+            <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="mb-4">
+                <div className="text-sm font-bold text-slate-900">项目记录</div>
+                <div className="text-xs text-slate-500">手动录入项目名称、申请要求和来源链接。留空则只创建导师主档案。</div>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <InputField label="项目名称" value={form.programName} onChange={(value) => update('programName', value)} placeholder="例如：PhD Marketing" />
+                <InputField label="项目链接" value={form.programUrl} onChange={(value) => update('programUrl', value)} placeholder="https://..." />
+                <div className="md:col-span-2">
+                  <label className="space-y-1.5 block">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">申请截止日期</div>
+                    <textarea
+                      value={form.deadlineRaw}
+                      onChange={(event) => update('deadlineRaw', event.target.value)}
+                      className="min-h-[72px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
                 </div>
-                <div className="col-span-2">
-                  <InputField 
-                    label="头像 URL (可选)" 
-                    icon={User} 
-                    value={form.photoUrl} 
-                    onChange={v => setForm({...form, photoUrl: v})} 
-                    placeholder="https://..." 
-                  />
+                <div className="md:col-span-2">
+                  <label className="space-y-1.5 block">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">截止日期来源 URL</div>
+                    <textarea
+                      value={form.deadlineSourceUrls}
+                      onChange={(event) => update('deadlineSourceUrls', event.target.value)}
+                      placeholder="每行一个链接"
+                      className="min-h-[72px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="space-y-1.5 block">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">申请要求及材料</div>
+                    <textarea
+                      value={form.applicationRequirementsRaw}
+                      onChange={(event) => update('applicationRequirementsRaw', event.target.value)}
+                      className="min-h-[96px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="space-y-1.5 block">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">申请要求来源 URL</div>
+                    <textarea
+                      value={form.applicationRequirementsSourceUrls}
+                      onChange={(event) => update('applicationRequirementsSourceUrls', event.target.value)}
+                      placeholder="每行一个链接"
+                      className="min-h-[72px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="space-y-1.5 block">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">RP 要求</div>
+                    <textarea
+                      value={form.rpRequirementsRaw}
+                      onChange={(event) => update('rpRequirementsRaw', event.target.value)}
+                      className="min-h-[96px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="space-y-1.5 block">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">RP 要求来源 URL</div>
+                    <textarea
+                      value={form.rpRequirementsSourceUrls}
+                      onChange={(event) => update('rpRequirementsSourceUrls', event.target.value)}
+                      placeholder="每行一个链接"
+                      className="min-h-[72px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+                </div>
+                <div>
+                  <label className="space-y-1.5 block">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">学费</div>
+                    <textarea
+                      value={form.tuitionRaw}
+                      onChange={(event) => update('tuitionRaw', event.target.value)}
+                      className="min-h-[72px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+                </div>
+                <div>
+                  <label className="space-y-1.5 block">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">奖学金</div>
+                    <textarea
+                      value={form.scholarshipRaw}
+                      onChange={(event) => update('scholarshipRaw', event.target.value)}
+                      className="min-h-[72px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+                </div>
+                <div>
+                  <label className="space-y-1.5 block">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">学费来源 URL</div>
+                    <textarea
+                      value={form.tuitionSourceUrls}
+                      onChange={(event) => update('tuitionSourceUrls', event.target.value)}
+                      placeholder="每行一个链接"
+                      className="min-h-[72px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+                </div>
+                <div>
+                  <label className="space-y-1.5 block">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">奖学金来源 URL</div>
+                    <textarea
+                      value={form.scholarshipSourceUrls}
+                      onChange={(event) => update('scholarshipSourceUrls', event.target.value)}
+                      placeholder="每行一个链接"
+                      className="min-h-[72px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="space-y-1.5 block">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">推荐理由</div>
+                    <textarea
+                      value={form.recommendationReason}
+                      onChange={(event) => update('recommendationReason', event.target.value)}
+                      className="min-h-[96px] w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 bg-white/40 backdrop-blur-sm border-t border-white/50 flex justify-end space-x-3">
-          <button 
-            onClick={onClose}
-            className="px-6 py-2.5 text-gray-600 font-bold text-sm hover:bg-white/60 rounded-xl transition-all active:scale-95"
-          >
-            取消
-          </button>
-          <button 
-            onClick={handleSave}
-            className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-sm font-bold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md shadow-blue-500/20 active:scale-95 flex items-center"
-          >
-            <Save size={18} className="mr-2" />
-            保存导师信息
-          </button>
+        <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+            <span className="inline-flex items-center gap-1"><User size={14} /> 导师主实体</span>
+            <span className="inline-flex items-center gap-1"><Building2 size={14} /> 组织层级</span>
+            <span className="inline-flex items-center gap-1"><MapPin size={14} /> 地理层级</span>
+            <span className="inline-flex items-center gap-1"><Mail size={14} /> 联系方式</span>
+            <span className="inline-flex items-center gap-1"><Globe size={14} /> 主页链接</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={onClose} className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">取消</button>
+            <button onClick={handleSave} disabled={disabled} className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+              <span className="inline-flex items-center gap-2"><Save size={16} />保存导师</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

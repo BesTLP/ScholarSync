@@ -1,1541 +1,882 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { generateProfileAnalysis } from '../services/geminiService';
-import ReactMarkdown from 'react-markdown';
-import { 
-  ChevronLeft, 
-  Edit2, 
-  Plus, 
-  GraduationCap, 
-  BookOpen, 
-  FileText, 
-  Phone, 
-  Briefcase, 
-  Trophy, 
-  Lightbulb, 
-  Users, 
-  Target, 
-  Heart, 
-  ShieldCheck, 
-  FileSearch,
-  MoreHorizontal,
-  Sparkles,
-  X,
-  Calendar,
-  MapPin,
-  ChevronDown,
-  LayoutGrid,
-  ClipboardList,
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowLeft,
+  BookOpen,
+  Briefcase,
+  CalendarClock,
+  Edit3,
+  FileText,
+  GraduationCap,
   Mail,
-  UserCheck,
-  Award,
-  Clapperboard,
-  FileBadge,
+  Phone,
+  Plus,
+  Search,
+  Sparkles,
+  Star,
+  Target,
   Trash2,
-  Archive,
-  Download,
-  Link as LinkIcon,
-  UserPlus,
-  ArchiveRestore,
-  Upload,
-  CheckCircle2
+  UserRoundPlus,
+  Users,
+  X,
 } from 'lucide-react';
-import { Client, FacultyRecord, ClientEvent } from '../types';
+import { generateProfileAnalysis } from '../services/geminiService';
+import {
+  buildEvaluationForClient,
+  filterFacultyDatabaseByPanelFilters,
+  getRecommendationSourceModes,
+} from '../services/facultyMatching';
+import {
+  buildSelectionProfile,
+  buildSelectionProfilePatch,
+  joinMultiValue,
+  splitMultiValue,
+} from '../services/selectionProfile';
+import type {
+  Client,
+  ClientDocument,
+  ClientSelectionProfile,
+  FacultyRecord,
+  MentorEvaluationSnapshot,
+  MentorRecommendation,
+  RecommendationOrigin,
+  SourceMode,
+} from '../types';
 import FacultyCard from './FacultyCard';
+
+type DetailTab = 'profile' | 'documents' | 'mentors';
+
+type LinkOptions = {
+  sourceModes?: SourceMode[];
+  addedFrom?: RecommendationOrigin;
+  evaluation?: MentorEvaluationSnapshot;
+};
 
 interface ClientDetailProps {
   client: Client;
   onBack: () => void;
   onStartWriting: (type?: string) => void;
-  onEditDocument: (doc: any) => void;
+  onEditDocument: (doc: ClientDocument) => void;
   onUpdateClient: (client: Client) => void;
-  initialTab?: 'profile' | 'documents' | 'mentors';
+  initialTab?: DetailTab;
   facultyDatabase?: FacultyRecord[];
-  onLinkFacultyToClient?: (facultyId: string, clientId: string) => void;
+  onLinkFacultyToClient?: (facultyId: string, clientId: string, options?: LinkOptions) => void;
   onUnlinkFacultyFromClient?: (facultyId: string, clientId: string) => void;
   onDeleteClient?: (clientId: string) => void;
+  onOpenAdvancedFacultyFilters?: (client: Client) => void;
 }
 
-const Modal: React.FC<{ isOpen: boolean; onClose: () => void; onConfirm: () => void; title: string; children: React.ReactNode }> = ({ isOpen, onClose, onConfirm, title, children }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h3 className="text-lg font-bold text-gray-900">{title}</h3>
-          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
-            <X size={20} />
-          </button>
-        </div>
-        <div className="p-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
-          {children}
-        </div>
-        <div className="px-6 py-4 bg-white flex justify-end border-t border-gray-50">
-          <button onClick={onConfirm} className="w-full py-3 bg-cyan-500 text-white rounded-xl text-sm font-bold hover:bg-cyan-600 transition-all shadow-lg shadow-cyan-100 active:scale-95">
-            确认
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+type PickerFilters = {
+  country: string;
+  university: string;
+  school: string;
+  department: string;
+  major: string;
+  keyword: string;
+  projectKeyword: string;
+  hasScholarship: boolean;
+  degreeType: 'phd' | 'master' | 'unspecified';
 };
 
-const InputField = ({ label, placeholder, type = "text", selectOptions, value, onChange }: { label: string; placeholder?: string; type?: string; selectOptions?: string[], value?: string, onChange?: (val: string) => void }) => (
-  <div className="space-y-1.5">
-    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider ml-1">{label}</label>
-    <div className="relative">
-      {type === 'textarea' ? (
-        <textarea 
-          placeholder={placeholder}
-          value={value}
-          onChange={e => onChange?.(e.target.value)}
-          className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-cyan-500 transition-all placeholder:text-gray-300 min-h-[100px] resize-none"
-        />
-      ) : selectOptions ? (
-        <div className="relative">
-          <select 
-            value={value}
-            onChange={e => onChange?.(e.target.value)}
-            className="w-full appearance-none bg-gray-50 border-none rounded-xl px-4 py-3 text-sm text-gray-700 focus:ring-2 focus:ring-cyan-500 transition-all cursor-pointer"
-          >
-            <option value="" disabled>请选择</option>
-            {selectOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-          </select>
-          <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-        </div>
-      ) : (
-        <div className="relative">
-          <input 
-            type={type} 
-            placeholder={type === 'date' ? 'YYYY-MM-DD' : placeholder}
-            value={value}
-            onChange={e => onChange?.(e.target.value)}
-            className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-cyan-500 transition-all placeholder:text-gray-300"
-          />
-          {type === 'date' && <Calendar size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />}
-        </div>
-      )}
+const EMPTY_PICKER_FILTERS: PickerFilters = {
+  country: '',
+  university: '',
+  school: '',
+  department: '',
+  major: '',
+  keyword: '',
+  projectKeyword: '',
+  hasScholarship: false,
+  degreeType: 'unspecified',
+};
+
+const documentTypeToAction: Record<string, string> = {
+  PS: '写PS',
+  Essay: '写命题文书',
+  LOR: '写推荐信',
+  CV: '写CV',
+  'Free Writing': '自由写作',
+};
+
+function formatDate(value?: string) {
+  if (!value) return '未填写';
+  return value;
+}
+
+function boolLabel(value?: boolean) {
+  if (value === true) return '已具备';
+  if (value === false) return '暂未准备';
+  return '未填写';
+}
+
+function summarizeRecommendation(
+  recommendation: MentorRecommendation | undefined,
+  fallbackScore: number,
+) {
+  const evaluation = recommendation?.evaluation;
+  if (!evaluation) {
+    return {
+      score: fallbackScore,
+      bandLabel: fallbackScore >= 80 ? '高匹配' : fallbackScore >= 60 ? '中匹配' : '待确认',
+      summary: '暂未保存评估，建议点击“一键评估”生成统一评分。',
+      reasons: [] as string[],
+    };
+  }
+
+  return {
+    score: evaluation.score,
+    bandLabel: evaluation.band === 'high' ? '高匹配' : evaluation.band === 'medium' ? '中匹配' : '低匹配',
+    summary: evaluation.summary,
+    reasons: evaluation.reasons,
+  };
+}
+
+function createProfileDraft(profile: ClientSelectionProfile) {
+  return {
+    countries: joinMultiValue(profile.countries, '\n'),
+    universities: joinMultiValue(profile.universities, '\n'),
+    departments: joinMultiValue(profile.departments, '\n'),
+    majors: joinMultiValue(profile.majors, '\n'),
+    degreeType: profile.degreeType || 'unspecified',
+    majorA: profile.majorA || '',
+    majorB: profile.majorB || '',
+    crossDiscipline: Boolean(profile.crossDiscipline),
+    officialLinks: joinMultiValue(profile.officialLinks, '\n'),
+    targetPosition: profile.targetPosition || '',
+    entryYear: profile.entryYear || '',
+    selectionCount: profile.selectionCount ? String(profile.selectionCount) : '',
+    selectionType: profile.selectionType || '',
+    selectionDeadline: profile.selectionDeadline || '',
+    scholarshipRequirement: profile.scholarshipRequirement || '',
+    exclusions: profile.exclusions || '',
+    rankingPreference: profile.rankingPreference || '',
+    specialRequirements: profile.specialRequirements || '',
+    businessCoordinator: profile.businessCoordinator || '',
+    hasRP: profile.hasRP,
+    hasCV: profile.hasCV,
+    hasPublications: profile.hasPublications,
+    rpTopic: profile.rpTopic || '',
+    avoidPreviousMentors: profile.avoidPreviousMentors || '',
+  };
+}
+
+function draftToProfile(draft: ReturnType<typeof createProfileDraft>): ClientSelectionProfile {
+  return {
+    countries: splitMultiValue(draft.countries),
+    universities: splitMultiValue(draft.universities),
+    departments: splitMultiValue(draft.departments),
+    majors: splitMultiValue(draft.majors),
+    degreeType: draft.degreeType,
+    majorA: draft.majorA.trim(),
+    majorB: draft.majorB.trim(),
+    crossDiscipline: draft.crossDiscipline,
+    officialLinks: splitMultiValue(draft.officialLinks),
+    targetPosition: draft.targetPosition.trim(),
+    entryYear: draft.entryYear.trim(),
+    selectionCount: draft.selectionCount ? Number(draft.selectionCount) : undefined,
+    selectionType: draft.selectionType.trim(),
+    selectionDeadline: draft.selectionDeadline.trim(),
+    scholarshipRequirement: draft.scholarshipRequirement.trim(),
+    exclusions: draft.exclusions.trim(),
+    rankingPreference: draft.rankingPreference.trim(),
+    specialRequirements: draft.specialRequirements.trim(),
+    businessCoordinator: draft.businessCoordinator.trim(),
+    hasRP: draft.hasRP,
+    hasCV: draft.hasCV,
+    hasPublications: draft.hasPublications,
+    rpTopic: draft.rpTopic.trim(),
+    avoidPreviousMentors: draft.avoidPreviousMentors.trim(),
+  };
+}
+
+const Panel = ({
+  title,
+  action,
+  icon,
+  children,
+  className = '',
+}: {
+  title: string;
+  action?: React.ReactNode;
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) => (
+  <section className={`rounded-[28px] border border-slate-200/80 bg-white/90 shadow-[0_18px_60px_rgba(15,23,42,0.06)] ${className}`}>
+    <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+      <div className="flex items-center gap-3">
+        {icon ? <div className="rounded-2xl bg-slate-100 p-2 text-slate-600">{icon}</div> : null}
+        <div className="text-sm font-black tracking-wide text-slate-900">{title}</div>
+      </div>
+      {action}
     </div>
+    <div className="px-5 py-4">{children}</div>
+  </section>
+);
+
+const MiniStat = ({ label, value }: { label: string; value: string | number }) => (
+  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">{label}</div>
+    <div className="mt-2 text-lg font-black text-slate-900">{value}</div>
   </div>
 );
 
-const ClientDetail: React.FC<ClientDetailProps> = ({ 
-  client, 
-  onBack, 
-  onStartWriting, 
-  onEditDocument, 
-  onUpdateClient, 
+const FieldList = ({ rows }: { rows: Array<{ label: string; value?: string | number | null }> }) => (
+  <div className="grid gap-3 sm:grid-cols-2">
+    {rows.map((row) => (
+      <div key={row.label} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3">
+        <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">{row.label}</div>
+        <div className="mt-2 whitespace-pre-wrap break-words text-sm font-semibold leading-6 text-slate-700">
+          {row.value || '未填写'}
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
+const EmptyBlock = ({ title, description }: { title: string; description: string }) => (
+  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 px-4 py-5 text-center">
+    <div className="text-sm font-bold text-slate-700">{title}</div>
+    <div className="mt-1 text-xs leading-5 text-slate-500">{description}</div>
+  </div>
+);
+
+const ClientDetail: React.FC<ClientDetailProps> = ({
+  client,
+  onBack,
+  onStartWriting,
+  onEditDocument,
+  onUpdateClient,
   initialTab = 'profile',
   facultyDatabase = [],
   onLinkFacultyToClient,
   onUnlinkFacultyFromClient,
-  onDeleteClient
+  onDeleteClient,
+  onOpenAdvancedFacultyFilters,
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'documents' | 'mentors'>(initialTab);
-  const [showWritingMenu, setShowWritingMenu] = useState(false);
-  const [showContactMenu, setShowContactMenu] = useState(false);
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const [showAddInfoMenu, setShowAddInfoMenu] = useState(false);
-  const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [basicInfoForm, setBasicInfoForm] = useState({ name: client.name, advisor: client.advisor || '', gpa: client.gpa || '' });
-
-  // Form states
-  const [eduForm, setEduForm] = useState({ school: '', degree: '', major: '', gpa: '', extraInfo: '', notes: '', startDate: '', endDate: '' });
-  const [workForm, setWorkForm] = useState({ company: '', position: '', startDate: '', endDate: '', description: '' });
-  const [awardForm, setAwardForm] = useState({ name: '', level: '', date: '', description: '' });
-  const [contactForm, setContactForm] = useState({ type: 'phone' as 'phone' | 'address' | 'email', value: '' });
-  const [researchForm, setResearchForm] = useState({ title: '', journal: '', date: '', link: '' });
-  const [identityForm, setIdentityForm] = useState({ type: '身份证', number: '', expiry: '' });
-  const [eventForm, setEventForm] = useState<Partial<ClientEvent>>({
-    title: '',
-    date: '',
-    time: '',
-    type: 'other',
-    description: '',
-    priority: 'medium',
-    completed: false
-  });
-  const [avatarUrlInput, setAvatarUrlInput] = useState('');
-  const avatarInputRef = useRef<HTMLInputElement>(null);
-  
-  const [aiAnalysis, setAiAnalysis] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-
-  const writingMenuRef = useRef<HTMLDivElement>(null);
-  const contactMenuRef = useRef<HTMLDivElement>(null);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
-  const addInfoMenuRef = useRef<HTMLDivElement>(null);
-
-  // Refs for scrolling
-  const academicRef = useRef<HTMLDivElement>(null);
-  const extracurricularRef = useRef<HTMLDivElement>(null);
-  const interestsRef = useRef<HTMLDivElement>(null);
-  const careerRef = useRef<HTMLDivElement>(null);
-  const experiencesRef = useRef<HTMLDivElement>(null);
-  const skillsRef = useRef<HTMLDivElement>(null);
-  const growthRef = useRef<HTMLDivElement>(null);
+  const [activeTab, setActiveTab] = useState<DetailTab>(initialTab);
+  const [analysis, setAnalysis] = useState('');
+  const [isAnalysisLoading, setIsAnalysisLoading] = useState(false);
+  const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
+  const [profileDraft, setProfileDraft] = useState(() => createProfileDraft(buildSelectionProfile(client)));
+  const [mentorPickerOpen, setMentorPickerOpen] = useState(false);
+  const [pickerFilters, setPickerFilters] = useState<PickerFilters>(EMPTY_PICKER_FILTERS);
+  const [pickerSelectedIds, setPickerSelectedIds] = useState<string[]>([]);
+  const [selectedMentorIds, setSelectedMentorIds] = useState<string[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (writingMenuRef.current && !writingMenuRef.current.contains(event.target as Node)) {
-        setShowWritingMenu(false);
-      }
-      if (contactMenuRef.current && !contactMenuRef.current.contains(event.target as Node)) {
-        setShowContactMenu(false);
-      }
-      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target as Node)) {
-        setShowMoreMenu(false);
-      }
-      if (addInfoMenuRef.current && !addInfoMenuRef.current.contains(event.target as Node)) {
-        setShowAddInfoMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    setActiveTab(initialTab);
+  }, [initialTab, client.id]);
 
-  const handleUpdateBasicInfo = () => {
-    onUpdateClient({
-      ...client,
-      name: basicInfoForm.name,
-      advisor: basicInfoForm.advisor,
-      gpa: basicInfoForm.gpa
+  useEffect(() => {
+    const nextProfile = buildSelectionProfile(client);
+    setProfileDraft(createProfileDraft(nextProfile));
+    setPickerFilters({
+      country: nextProfile.countries[0] || '',
+      university: nextProfile.universities[0] || '',
+      school: nextProfile.departments[0] || '',
+      department: nextProfile.departments[1] || '',
+      major: nextProfile.majorA || nextProfile.majors[0] || '',
+      keyword: '',
+      projectKeyword: nextProfile.majorB || '',
+      hasScholarship: Boolean(nextProfile.scholarshipRequirement),
+      degreeType: nextProfile.degreeType || 'unspecified',
     });
-    setActiveModal(null);
-  };
+    setSelectedMentorIds([]);
+    setPickerSelectedIds([]);
+  }, [client]);
 
-  const handleAddEducation = () => {
-    const newEdu = { id: Math.random().toString(), ...eduForm };
-    onUpdateClient({
-      ...client,
-      educations: [...(client.educations || []), newEdu],
-      educationCount: (client.educationCount || 0) + 1
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = window.setTimeout(() => setToast(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const selectionProfile = useMemo(() => buildSelectionProfile(client), [client]);
+  const recommendationMap = useMemo(
+    () => new Map((client.mentorRecommendations || []).map((item) => [item.facultyId, item])),
+    [client.mentorRecommendations],
+  );
+
+  const recommendedFaculty = useMemo(() => {
+    const ids = new Set<string>([
+      ...(client.linkedFacultyIds || []),
+      ...(client.mentorRecommendations || []).map((item) => item.facultyId),
+    ]);
+
+    return facultyDatabase.filter((faculty) => ids.has(faculty.id));
+  }, [client.linkedFacultyIds, client.mentorRecommendations, facultyDatabase]);
+
+  const mentorPickerResults = useMemo(() => {
+    const projectKeyword = [pickerFilters.projectKeyword, pickerFilters.major].filter(Boolean).join(' ');
+    return filterFacultyDatabaseByPanelFilters(facultyDatabase, {
+      country: pickerFilters.country,
+      university: pickerFilters.university,
+      school: pickerFilters.school,
+      department: [pickerFilters.department, pickerFilters.major].filter(Boolean).join(' '),
+      keyword: pickerFilters.keyword,
+      projectKeyword,
+      hasScholarship: pickerFilters.hasScholarship,
+      degreeType: pickerFilters.degreeType,
     });
-    setEduForm({ school: '', degree: '', major: '', gpa: '', extraInfo: '', notes: '', startDate: '', endDate: '' });
-    setActiveModal(null);
-  };
+  }, [facultyDatabase, pickerFilters]);
 
-  const handleAddWork = () => {
-    const newWork = { id: Math.random().toString(), ...workForm };
-    onUpdateClient({
-      ...client,
-      works: [...(client.works || []), newWork]
-    });
-    setWorkForm({ company: '', position: '', startDate: '', endDate: '', description: '' });
-    setActiveModal(null);
-  };
+  const selectedMentors = useMemo(
+    () => recommendedFaculty.filter((faculty) => selectedMentorIds.includes(faculty.id)),
+    [recommendedFaculty, selectedMentorIds],
+  );
 
-  const handleAddAward = () => {
-    const newAward = { id: Math.random().toString(), ...awardForm };
-    onUpdateClient({
-      ...client,
-      awards: [...(client.awards || []), newAward]
-    });
-    setAwardForm({ name: '', level: '', date: '', description: '' });
-    setActiveModal(null);
-  };
+  const upcomingEvents = useMemo(
+    () =>
+      [...(client.events || [])]
+        .sort((left, right) => `${left.date}${left.time || ''}`.localeCompare(`${right.date}${right.time || ''}`))
+        .slice(0, 5),
+    [client.events],
+  );
 
-  const handleAddContact = () => {
-    const newContact = { id: Math.random().toString(), ...contactForm };
-    onUpdateClient({
-      ...client,
-      contacts: [...(client.contacts || []), newContact],
-      contact: client.contact === '暂无联系方式' || !client.contact ? contactForm.value : client.contact
-    });
-    setContactForm({ type: 'phone', value: '' });
-    setActiveModal(null);
-  };
+  const documents = client.documents || [];
+  const bestRecommendationScore = recommendedFaculty.reduce((best, faculty) => {
+    const score = recommendationMap.get(faculty.id)?.evaluation?.score ?? faculty.matchScore ?? 0;
+    return Math.max(best, score);
+  }, 0);
 
-  const handleAddResearch = () => {
-    const newPaper = { id: Math.random().toString(), ...researchForm };
-    onUpdateClient({
-      ...client,
-      researchPapers: [...(client.researchPapers || []), newPaper]
-    });
-    setResearchForm({ title: '', journal: '', date: '', link: '' });
-    setActiveModal(null);
-  };
-
-  const handleAddIdentity = () => {
-    const newDoc = { id: Math.random().toString(), ...identityForm };
-    onUpdateClient({
-      ...client,
-      identityDocs: [...(client.identityDocs || []), newDoc]
-    });
-    setIdentityForm({ type: '身份证', number: '', expiry: '' });
-    setActiveModal(null);
-  };
-
-  const handleSaveEvent = () => {
-    if (!eventForm.title || !eventForm.date) {
-      alert('请输入标题和日期');
-      return;
-    }
-    
-    const newEvent: ClientEvent = {
-      id: eventForm.id || crypto.randomUUID(),
-      clientId: client.id,
-      title: eventForm.title,
-      date: eventForm.date,
-      time: eventForm.time,
-      type: eventForm.type as any,
-      description: eventForm.description,
-      priority: eventForm.priority as any,
-      completed: eventForm.completed || false
-    };
-
-    let updatedEvents;
-    if (eventForm.id) {
-      updatedEvents = (client.events || []).map(e => e.id === eventForm.id ? newEvent : e);
-    } else {
-      updatedEvents = [...(client.events || []), newEvent];
-    }
-
-    onUpdateClient({
-      ...client,
-      events: updatedEvents
-    });
-    
-    setEventForm({ title: '', date: '', time: '', type: 'other', description: '', priority: 'medium', completed: false });
-    setActiveModal(null);
-  };
-
-  const handleDeleteEvent = (eventId: string) => {
-    if (confirm('确定要删除该事件吗？')) {
-      const updatedEvents = (client.events || []).filter(e => e.id !== eventId);
-      onUpdateClient({
-        ...client,
-        events: updatedEvents
-      });
-    }
-  };
-
-  const handleToggleEventComplete = (eventId: string) => {
-    const updatedEvents = (client.events || []).map(e => 
-      e.id === eventId ? { ...e, completed: !e.completed } : e
-    );
-    onUpdateClient({
-      ...client,
-      events: updatedEvents
-    });
-  };
-
-  const handleUpdateAvatar = () => {
-    if (avatarUrlInput) {
-      onUpdateClient({ ...client, avatarUrl: avatarUrlInput });
-    }
-    setActiveModal(null);
-  };
-
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        if (result) {
-          setAvatarUrlInput(result);
-        }
-      };
-      reader.readAsDataURL(file);
-    }
+  const updateProfileDraft = (key: keyof ReturnType<typeof createProfileDraft>, value: string | boolean | undefined) => {
+    setProfileDraft((current) => ({ ...current, [key]: value }));
   };
 
   const handleGenerateAnalysis = async () => {
-    setIsAnalyzing(true);
+    setIsAnalysisLoading(true);
     try {
-      const analysis = await generateProfileAnalysis(client);
-      setAiAnalysis(analysis);
-    } catch (e) {
-      console.error(e);
+      setAnalysis(await generateProfileAnalysis(client));
+    } catch (error) {
+      console.error('Generate profile analysis failed:', error);
+      setToast('AI 分析生成失败，请稍后重试。');
     } finally {
-      setIsAnalyzing(false);
+      setIsAnalysisLoading(false);
     }
   };
 
-  const handleExportJSON = () => {
-    const dataStr = JSON.stringify(client, null, 2);
-    const blob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${client.name}_profile.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setShowMoreMenu(false);
+  const handleSaveSelectionProfile = () => {
+    onUpdateClient({
+      ...client,
+      ...buildSelectionProfilePatch(draftToProfile(profileDraft)),
+    });
+    setIsSelectionModalOpen(false);
+    setToast('择导档案已更新。');
   };
 
-  const handleToggleArchive = () => {
-    const newStatus = client.status === 'archived' ? 'active' : 'archived';
-    onUpdateClient({ ...client, status: newStatus });
-    setShowMoreMenu(false);
+  const handleAddSelectedMentors = () => {
+    if (!onLinkFacultyToClient || pickerSelectedIds.length === 0) return;
+    pickerSelectedIds.forEach((facultyId) => {
+      const faculty = mentorPickerResults.find((item) => item.id === facultyId);
+      onLinkFacultyToClient(facultyId, client.id, {
+        sourceModes: ['local'],
+        addedFrom: 'student-detail',
+        evaluation: faculty ? buildEvaluationForClient(client, faculty) : undefined,
+      });
+    });
+    setPickerSelectedIds([]);
+    setMentorPickerOpen(false);
+    setToast(`已添加 ${pickerSelectedIds.length} 位导师到该学生。`);
   };
 
-  const handleDeleteClient = () => {
-    if (window.confirm('确定要删除该客户吗？此操作无法撤销。')) {
-      console.log('Deleting client from detail view:', client.id);
-      onDeleteClient?.(client.id);
-      onBack();
+  const saveEvaluations = (targetFaculty: FacultyRecord[]) => {
+    if (targetFaculty.length === 0) {
+      setToast('请先选择至少一位导师。');
+      return;
     }
-    setShowMoreMenu(false);
-  };
 
-  const handleDownloadDocument = (doc: any) => {
-    const blob = new Blob([doc.content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${doc.title || 'document'}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleDeleteDocument = (docId: string) => {
-    if (confirm('确定要删除该文档吗？此操作无法撤销。')) {
-      const updatedDocs = client.documents?.filter(d => d.id !== docId) || [];
-      onUpdateClient({ ...client, documents: updatedDocs });
-    }
-  };
-
-  const scrollToSection = (ref: React.RefObject<HTMLDivElement>) => {
-    if (ref.current) {
-      ref.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // Focus the textarea inside
-      const textarea = ref.current.querySelector('textarea');
-      if (textarea) textarea.focus();
-    }
-    setShowAddInfoMenu(false);
-  };
-
-  const InfoCard = ({ icon: Icon, title, children, onAdd, items, renderItem }: { icon: any, title: string, children?: React.ReactNode, onAdd?: () => void, items?: any[], renderItem?: (item: any) => React.ReactNode }) => (
-    <div className="glass rounded-3xl border border-white/50 p-6 shadow-sm hover:shadow-md transition-all duration-300 relative group hover:scale-[1.01]">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center space-x-2">
-          <div className="p-2 bg-white/60 backdrop-blur-sm rounded-xl text-gray-500 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors shadow-sm">
-            <Icon size={18} />
-          </div>
-          <h4 className="text-sm font-bold text-gray-900 tracking-tight">{title}</h4>
-        </div>
-        {onAdd && (
-          <div className="relative" ref={title === '联系方式' ? contactMenuRef : null}>
-            <button onClick={onAdd} className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-white/50 rounded-lg transition-all active:scale-95">
-              <Plus size={16} />
-            </button>
-            {title === '联系方式' && showContactMenu && (
-              <div className="absolute top-full right-0 mt-2 w-48 glass rounded-2xl shadow-xl border border-white/50 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                <button 
-                  onClick={() => { setActiveModal('contact'); setContactForm({ type: 'phone', value: '' }); setShowContactMenu(false); }}
-                  className="w-full flex items-center px-4 py-3 text-xs font-bold text-gray-700 hover:bg-white/60 transition-colors"
-                >
-                  <Phone size={14} className="mr-3 text-blue-500" />
-                  添加联系方式
-                </button>
-                <button 
-                  onClick={() => { setActiveModal('contact'); setContactForm({ type: 'address', value: '' }); setShowContactMenu(false); }}
-                  className="w-full flex items-center px-4 py-3 text-xs font-bold text-gray-700 hover:bg-white/60 transition-colors"
-                >
-                  <MapPin size={14} className="mr-3 text-orange-500" />
-                  添加地址
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-      <div className="min-h-[60px]">
-        {items && items.length > 0 && renderItem ? (
-          <div className="space-y-3">
-            {items.map((item, index) => (
-              <React.Fragment key={item.id || index}>
-                {renderItem(item)}
-              </React.Fragment>
-            ))}
-          </div>
-        ) : children || (
-          <div className="flex flex-col items-center justify-center py-6 text-center bg-white/30 rounded-2xl border border-dashed border-gray-200/50">
-            <div className="w-10 h-10 bg-white/50 rounded-full flex items-center justify-center text-gray-400 mb-2 shadow-sm">
-              <Icon size={20} />
-            </div>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">暂无{title}</p>
-            <button 
-              onClick={onAdd}
-              className="mt-3 px-4 py-1.5 bg-blue-50/50 text-blue-600 rounded-xl text-[10px] font-bold hover:bg-blue-100 transition-all shadow-sm active:scale-95"
-            >
-              添加信息
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const EditableField = ({ value, onChange, placeholder }: { value?: string; onChange: (val: string) => void; placeholder: string }) => (
-    <div className="w-full">
-      <textarea 
-        placeholder={placeholder}
-        value={value || ''}
-        onChange={e => onChange(e.target.value)}
-        className="w-full bg-gray-50/50 border-none rounded-xl p-4 text-xs text-gray-600 placeholder:text-gray-300 focus:ring-1 focus:ring-cyan-500 min-h-[100px] resize-none transition-all"
-      />
-    </div>
-  );
-
-  const renderTimeline = () => {
-    const events = [...(client.events || [])].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    const today = new Date().toISOString().split('T')[0];
-
-    return (
-      <div className="glass rounded-3xl border border-white/50 p-6 shadow-sm hover:shadow-md transition-all duration-300 relative group hover:scale-[1.01] col-span-2">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-2">
-            <div className="p-2 bg-white/60 backdrop-blur-sm rounded-xl text-gray-500 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors shadow-sm">
-              <Calendar size={18} />
-            </div>
-            <h4 className="text-sm font-bold text-gray-900 tracking-tight">关键日程</h4>
-          </div>
-          <button 
-            onClick={() => {
-              setEventForm({ title: '', date: '', time: '', type: 'other', description: '', priority: 'medium', completed: false });
-              setActiveModal('event');
-            }} 
-            className="flex items-center px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-all"
-          >
-            <Plus size={14} className="mr-1" />
-            添加事件
-          </button>
-        </div>
-
-        {events.length > 0 ? (
-          <>
-            {/* Horizontal Timeline */}
-            <div className="mb-8 overflow-x-auto custom-scrollbar pb-4">
-              <div className="flex items-center min-w-max px-4">
-                {events.map((event, index) => {
-                  const isPast = event.date < today;
-                  const isCompleted = event.completed;
-                  return (
-                    <div key={event.id} className="flex items-center">
-                      <div className="flex flex-col items-center relative">
-                        <div className={`w-4 h-4 rounded-full flex items-center justify-center z-10 ${isCompleted ? 'bg-emerald-500 text-white' : isPast ? 'bg-gray-400' : 'bg-white border-2 border-blue-500'}`}>
-                          {isCompleted && <CheckCircle2 size={10} />}
-                        </div>
-                        <div className="absolute top-6 flex flex-col items-center w-24">
-                          <span className="text-[10px] font-bold text-gray-500">{event.date.slice(5)}</span>
-                          <span className="text-[10px] text-gray-700 truncate w-full text-center" title={event.title}>{event.title}</span>
-                        </div>
-                      </div>
-                      {index < events.length - 1 && (
-                        <div className={`h-0.5 w-16 ${isCompleted || isPast ? 'bg-gray-300' : 'bg-gray-200'}`} />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Event List */}
-            <div className="space-y-3">
-              {events.map(event => {
-                const typeColors: Record<string, string> = {
-                  deadline: 'bg-red-50 text-red-700 border-red-200',
-                  interview: 'bg-blue-50 text-blue-700 border-blue-200',
-                  submission: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-                  meeting: 'bg-purple-50 text-purple-700 border-purple-200',
-                  reminder: 'bg-orange-50 text-orange-700 border-orange-200',
-                  other: 'bg-gray-50 text-gray-700 border-gray-200'
-                };
-                const colorClass = typeColors[event.type] || typeColors.other;
-                const priorityClass = event.priority === 'high' ? 'border-l-4 border-l-red-500' : event.priority === 'medium' ? 'border-l-4 border-l-orange-500' : '';
-
-                return (
-                  <div key={event.id} className={`p-4 rounded-xl border flex items-start justify-between ${colorClass} ${priorityClass} ${event.completed ? 'opacity-50 grayscale' : ''}`}>
-                    <div className="flex items-start space-x-3">
-                      <button 
-                        onClick={() => handleToggleEventComplete(event.id)}
-                        className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${event.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-gray-300 text-transparent hover:border-emerald-500'}`}
-                      >
-                        <CheckCircle2 size={14} />
-                      </button>
-                      <div>
-                        <div className="flex items-center space-x-2 mb-1">
-                          <span className={`text-sm font-bold ${event.completed ? 'line-through' : ''}`}>{event.title}</span>
-                          <span className="text-[10px] font-medium px-1.5 py-0.5 bg-white/50 rounded">{event.date} {event.time}</span>
-                        </div>
-                        {event.description && <p className="text-xs opacity-80 mt-1">{event.description}</p>}
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <button 
-                        onClick={() => { setEventForm(event); setActiveModal('event'); }}
-                        className="p-1.5 text-current opacity-60 hover:opacity-100 hover:bg-white/50 rounded-lg transition-all"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteEvent(event.id)}
-                        className="p-1.5 text-current opacity-60 hover:opacity-100 hover:bg-white/50 rounded-lg transition-all"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-col items-center justify-center py-8 text-center bg-white/30 rounded-2xl border border-dashed border-gray-200/50">
-            <div className="w-10 h-10 bg-white/50 rounded-full flex items-center justify-center text-gray-400 mb-2 shadow-sm">
-              <Calendar size={20} />
-            </div>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">暂无关键日程</p>
-          </div>
-        )}
-      </div>
+    const nextRecommendations = new Map<string, MentorRecommendation>(
+      (client.mentorRecommendations || []).map((item) => [item.facultyId, item]),
     );
+
+    targetFaculty.forEach((faculty) => {
+      const current = nextRecommendations.get(faculty.id);
+      nextRecommendations.set(faculty.id, {
+        facultyId: faculty.id,
+        addedAt: current?.addedAt || new Date().toISOString(),
+        addedFrom: current?.addedFrom || 'student-detail',
+        sourceModes: getRecommendationSourceModes(current?.sourceModes),
+        notes: current?.notes,
+        evaluation: buildEvaluationForClient(client, faculty),
+      });
+    });
+
+    onUpdateClient({
+      ...client,
+      mentorRecommendations: Array.from(nextRecommendations.values()),
+    });
+
+    setToast(`已更新 ${targetFaculty.length} 位导师的匹配评估。`);
+  };
+
+  const handleEvaluateMentors = () => {
+    saveEvaluations(selectedMentors.length > 0 ? selectedMentors : recommendedFaculty);
+  };
+
+  const handleRemoveSelectedMentors = () => {
+    if (!onUnlinkFacultyFromClient || selectedMentorIds.length === 0) {
+      setToast('请先勾选要移除的导师。');
+      return;
+    }
+
+    selectedMentorIds.forEach((facultyId) => onUnlinkFacultyFromClient(facultyId, client.id));
+    setSelectedMentorIds([]);
+    setToast('已移除所选推荐导师。');
   };
 
   return (
-    <div className="min-h-screen bg-[#F7F8FA]">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-100 px-8 py-4 sticky top-0 z-10">
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
-          <div className="flex items-center space-x-4">
-            <button 
-              onClick={onBack}
-              className="p-2 hover:bg-gray-50 rounded-full text-gray-400 transition-colors"
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <div className="flex items-center space-x-2 text-xs font-medium">
-              <span className="text-gray-400">留学咩</span>
-              <span className="text-gray-300">/</span>
-              <span className="text-gray-400">客户</span>
-              <span className="text-gray-300">/</span>
-              <span className="text-gray-900 font-bold">{client.name}</span>
-            </div>
-          </div>
-          <div className="flex items-center space-x-3 relative" ref={writingMenuRef}>
-            <button 
-              onClick={() => setShowWritingMenu(!showWritingMenu)}
-              className="flex items-center px-4 py-2 bg-cyan-500 text-white rounded-xl text-sm font-bold hover:bg-cyan-600 transition-all shadow-lg shadow-cyan-100 active:scale-95"
-            >
-              <LayoutGrid size={16} className="mr-2" />
-              开始创作
-            </button>
-            
-            {showWritingMenu && (
-              <div className="absolute top-full right-0 mt-2 w-[480px] bg-white rounded-3xl shadow-2xl border border-gray-100 p-6 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="grid grid-cols-4 gap-6">
-                  {[
-                    { icon: Sparkles, text: '文书Agent', color: 'text-cyan-500' },
-                    { icon: Edit2, text: '写PS', color: 'text-indigo-500' },
-                    { icon: ClipboardList, text: '写命题文书', color: 'text-blue-500' },
-                    { icon: Mail, text: '写推荐信', color: 'text-violet-500' },
-                    { icon: FileBadge, text: '写CV', color: 'text-purple-500' },
-                    { icon: Clapperboard, text: '自由创作', color: 'text-indigo-600' },
-                  ].map((item, idx) => (
-                    <button 
-                      key={idx}
-                      onClick={() => {
-                        onStartWriting(item.text);
-                        setShowWritingMenu(false);
-                      }}
-                      className="flex flex-col items-center space-y-3 group"
-                    >
-                      <div className={`w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center ${item.color} group-hover:bg-gray-100 transition-all group-hover:scale-110`}>
-                        <item.icon size={24} />
-                      </div>
-                      <span className="text-xs font-bold text-gray-700">{item.text}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="relative" ref={moreMenuRef}>
-              <button 
-                onClick={() => setShowMoreMenu(!showMoreMenu)}
-                className="p-2 text-gray-400 hover:bg-gray-50 rounded-xl border border-gray-100 transition-all"
-              >
-                <MoreHorizontal size={18} />
+    <div className="h-full overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(96,165,250,0.08),_transparent_32%),linear-gradient(180deg,#f8fbff_0%,#f6f7fb_100%)] px-6 py-6">
+      <div className="mx-auto flex max-w-[1560px] flex-col gap-6">
+        <header className="rounded-[34px] border border-white/70 bg-white/90 px-6 py-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <button onClick={onBack} className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-600 hover:border-slate-300 hover:text-slate-900">
+                <ArrowLeft size={18} />
               </button>
-              {showMoreMenu && (
-                <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50 animate-in fade-in zoom-in duration-200">
-                  <button onClick={handleExportJSON} className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center">
-                    <Download size={14} className="mr-2" />
-                    导出客户信息(JSON)
-                  </button>
-                  <button onClick={handleToggleArchive} className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center">
-                    {client.status === 'archived' ? <ArchiveRestore size={14} className="mr-2" /> : <Archive size={14} className="mr-2" />}
-                    {client.status === 'archived' ? '恢复到服务中' : '归档客户'}
-                  </button>
-                  <div className="h-px bg-gray-50 my-1" />
-                  <button onClick={handleDeleteClient} className="w-full text-left px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 flex items-center">
-                    <Trash2 size={14} className="mr-2" />
-                    删除客户
-                  </button>
+              <div>
+                <div className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">学生档案 / 留学咩</div>
+                <div className="mt-2 text-3xl font-black tracking-tight text-slate-950">{client.name}</div>
+                <div className="mt-2 flex flex-wrap gap-2 text-sm text-slate-500">
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold">状态：{client.status === 'active' ? '跟进中' : '已归档'}</span>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold">创建时间：{formatDate(client.createdAt)}</span>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold">顾问：{client.advisor || '未分配'}</span>
                 </div>
-              )}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button onClick={() => setIsSelectionModalOpen(true)} className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50">
+                <span className="inline-flex items-center gap-2"><Edit3 size={16} />编辑择导档案</span>
+              </button>
+              {onDeleteClient ? (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`确认删除学生「${client.name}」吗？`)) {
+                      onDeleteClient(client.id);
+                    }
+                  }}
+                  className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-bold text-rose-600 hover:bg-rose-100"
+                >
+                  <span className="inline-flex items-center gap-2"><Trash2 size={16} />删除学生</span>
+                </button>
+              ) : null}
             </div>
           </div>
-        </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto p-8">
-        {/* Tabs */}
-        <div className="flex items-center space-x-2 mb-8 bg-gray-100/50 p-1 rounded-xl w-fit">
-          <button 
-            onClick={() => setActiveTab('profile')}
-            className={`flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'profile' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'
-            }`}
-          >
-            <Users size={14} className="mr-2" />
-            档案
-          </button>
-          <button 
-            onClick={() => setActiveTab('documents')}
-            className={`flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'documents' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'
-            }`}
-          >
-            <FileText size={14} className="mr-2" />
-            客户文书
-          </button>
-          <button 
-            onClick={() => setActiveTab('mentors')}
-            className={`flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'mentors' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'
-            }`}
-          >
-            <UserCheck size={14} className="mr-2" />
-            推荐导师
-          </button>
-        </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <MiniStat label="GPA" value={client.gpa || '未填写'} />
+            <MiniStat label="文档数" value={documents.length} />
+            <MiniStat label="推荐导师" value={recommendedFaculty.length} />
+            <MiniStat label="最高匹配分" value={bestRecommendationScore || '待评估'} />
+          </div>
 
-        {activeTab === 'profile' && (
-          <div className="grid grid-cols-12 gap-6">
-            {/* Left Column - Main Profile */}
-            <div className="col-span-8 space-y-6">
-              {/* Profile Header Card */}
-              <div className="glass rounded-3xl border border-white/50 p-8 shadow-sm">
-                <div className="flex items-start justify-between mb-8">
-                  <div className="flex items-center space-x-6">
-                    <div className="w-20 h-20 bg-gray-900 rounded-full flex items-center justify-center text-white text-3xl font-bold overflow-hidden relative group cursor-pointer shadow-md" onClick={() => { setAvatarUrlInput(client.avatarUrl || ''); setActiveModal('avatar'); }}>
-                      <img 
-                        src={client.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`} 
-                        alt="avatar" 
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <Edit2 size={16} />
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex items-center space-x-3 mb-1">
-                        <h2 className="text-2xl font-bold text-gray-900 tracking-tight">{client.name}</h2>
-                        <button 
-                          onClick={() => {
-                            setBasicInfoForm({ name: client.name, advisor: client.advisor || '', gpa: client.gpa || '' });
-                            setActiveModal('basicInfo');
-                          }}
-                          className="text-gray-300 hover:text-blue-500 transition-colors"
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                      </div>
-                      <div className="flex items-center space-x-4">
-                        <span className="text-xs text-gray-500 flex items-center font-medium">
-                          <UserCheck size={12} className="mr-1 text-blue-500" />
-                          择导老师: <span className="text-blue-600 font-bold ml-1">{client.advisor || '未分配'}</span>
-                        </span>
-                        <span className="text-xs text-gray-300">|</span>
-                        <span className="text-xs text-gray-500 font-medium">状态: <span className={client.status === 'archived' ? "text-gray-400 font-bold" : "text-emerald-500 font-bold"}>{client.status === 'archived' ? '已归档' : '服务中'}</span></span>
-                      </div>
-                    </div>
+          <div className="mt-5 flex flex-wrap gap-2">
+            {(['profile', 'documents', 'mentors'] as DetailTab[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`rounded-full px-4 py-2 text-sm font-bold ${
+                  activeTab === tab ? 'bg-slate-950 text-white shadow-lg' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {tab === 'profile' ? '学生画像' : tab === 'documents' ? '申请材料' : '推荐导师'}
+              </button>
+            ))}
+          </div>
+        </header>
+
+        {activeTab === 'profile' ? (
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_380px]">
+            <div className="space-y-6">
+              <Panel title="核心信息" icon={<Users size={18} />}>
+                <FieldList
+                  rows={[
+                    { label: '当前院校', value: client.university },
+                    { label: '联系方式', value: client.contact },
+                    { label: '联系渠道', value: client.contacts?.map((item) => `${item.type}: ${item.value}`).join('\n') },
+                    { label: '学术亮点', value: client.academicAchievements },
+                    { label: '兴趣方向', value: client.interests },
+                    { label: '职业目标', value: client.careerAspirations },
+                  ]}
+                />
+              </Panel>
+
+              <Panel title="择导档案" icon={<Target size={18} />} action={<button onClick={() => setIsSelectionModalOpen(true)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">编辑</button>}>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+                    <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">目标地区 / 院校</div>
+                    <div className="text-sm font-semibold text-slate-700 whitespace-pre-wrap">{joinMultiValue(selectionProfile.countries, ' / ') || '未填写'}</div>
+                    <div className="text-sm font-semibold text-slate-700 whitespace-pre-wrap">{joinMultiValue(selectionProfile.universities, ' / ') || '未填写'}</div>
+                  </div>
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+                    <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">学院 / 系 / 专业</div>
+                    <div className="text-sm font-semibold text-slate-700 whitespace-pre-wrap">{joinMultiValue([...selectionProfile.departments, ...selectionProfile.majors], ' / ') || '未填写'}</div>
+                    <div className="text-sm font-semibold text-slate-700">申请层级：{selectionProfile.degreeType === 'phd' ? '申博' : selectionProfile.degreeType === 'master' ? '申硕' : '未指定'}</div>
                   </div>
                 </div>
-
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="bg-white/40 backdrop-blur-sm rounded-2xl p-4 border border-white/50 shadow-sm">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">GPA</span>
-                      <GraduationCap size={14} className="text-blue-400" />
-                    </div>
-                    <div className="text-xl font-bold text-gray-900">{client.gpa || '-'}</div>
-                  </div>
-                  <div className="bg-white/40 backdrop-blur-sm rounded-2xl p-4 border border-white/50 shadow-sm">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">教育经历</span>
-                      <BookOpen size={14} className="text-indigo-400" />
-                    </div>
-                    <div className="text-xl font-bold text-gray-900">{client.educations?.length || 0}</div>
-                  </div>
-                  <div className="bg-white/40 backdrop-blur-sm rounded-2xl p-4 border border-white/50 shadow-sm">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider">文书</span>
-                      <FileText size={14} className="text-purple-400" />
-                    </div>
-                    <div className="text-xl font-bold text-gray-900">{client.documents?.length || 0}</div>
-                  </div>
+                <div className="mt-4">
+                  <FieldList
+                    rows={[
+                      { label: '专业 A', value: selectionProfile.majorA },
+                      { label: '专业 B', value: selectionProfile.majorB },
+                      { label: '交叉学科', value: selectionProfile.crossDiscipline ? '是' : '否' },
+                      { label: '目标职级', value: selectionProfile.targetPosition },
+                      { label: '入学年份', value: selectionProfile.entryYear },
+                      { label: '奖学金要求', value: selectionProfile.scholarshipRequirement },
+                      { label: '排除项', value: selectionProfile.exclusions },
+                      { label: '指定院校链接', value: joinMultiValue(selectionProfile.officialLinks, '\n') },
+                    ]}
+                  />
                 </div>
+              </Panel>
+
+              <div className="grid gap-6 xl:grid-cols-2">
+                <Panel title="教育经历" icon={<GraduationCap size={18} />}>
+                  {client.educations && client.educations.length > 0 ? (
+                    <div className="space-y-3">
+                      {client.educations.map((item) => (
+                        <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+                          <div className="text-sm font-black text-slate-900">{item.school || '未填写学校'}</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-700">{[item.degree, item.major].filter(Boolean).join(' / ') || '未填写学位与专业'}</div>
+                          <div className="mt-2 text-xs font-semibold text-slate-500">GPA {item.gpa || '-'} · {formatDate(item.startDate)} - {formatDate(item.endDate)}</div>
+                          {[item.extraInfo, item.notes].filter(Boolean).length > 0 ? (
+                            <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{[item.extraInfo, item.notes].filter(Boolean).join('\n')}</div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyBlock title="暂无教育经历" description="这里会展示院校、专业、GPA 和时间线，避免信息散落在多个空白卡片里。" />
+                  )}
+                </Panel>
+
+                <Panel title="科研 / 工作 / 荣誉" icon={<Briefcase size={18} />}>
+                  <div className="space-y-4">
+                    {client.researchPapers && client.researchPapers.length > 0 ? (
+                      <div>
+                        <div className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">科研经历</div>
+                        <div className="space-y-2">
+                          {client.researchPapers.map((item) => (
+                            <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3">
+                              <div className="text-sm font-black text-slate-900">{item.title || '未命名项目'}</div>
+                              <div className="mt-1 text-sm text-slate-600">{[item.journal, item.date].filter(Boolean).join(' · ') || '未填写发表信息'}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {client.works && client.works.length > 0 ? (
+                      <div>
+                        <div className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">工作经历</div>
+                        <div className="space-y-2">
+                          {client.works.map((item) => (
+                            <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3">
+                              <div className="text-sm font-black text-slate-900">{item.position || '未命名岗位'}</div>
+                              <div className="mt-1 text-sm text-slate-600">{[item.company, `${formatDate(item.startDate)} - ${formatDate(item.endDate)}`].filter(Boolean).join(' · ')}</div>
+                              {item.description ? <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{item.description}</div> : null}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {client.awards && client.awards.length > 0 ? (
+                      <div>
+                        <div className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">荣誉奖项</div>
+                        <div className="space-y-2">
+                          {client.awards.map((item) => (
+                            <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3">
+                              <div className="text-sm font-black text-slate-900">{item.name || '未命名奖项'}</div>
+                              <div className="mt-1 text-sm text-slate-600">{[item.level, item.date].filter(Boolean).join(' · ') || '未填写奖项级别'}</div>
+                              {item.description ? <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{item.description}</div> : null}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {(!client.researchPapers || client.researchPapers.length === 0) &&
+                    (!client.works || client.works.length === 0) &&
+                    (!client.awards || client.awards.length === 0) ? (
+                      <EmptyBlock title="暂无补充经历" description="科研、工作和奖项会集中显示在这里，信息会更紧凑。" />
+                    ) : null}
+                  </div>
+                </Panel>
               </div>
+            </div>
 
-              {/* Grid of Info Cards */}
-              <div className="grid grid-cols-2 gap-6">
-                {/* 择导档案卡 */}
-                <div className="col-span-2">
-                  <InfoCard icon={ClipboardList} title="择导档案">
-                    <div className="grid grid-cols-2 gap-x-12 gap-y-2">
-                      <div className="space-y-2">
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">目标国家</span>
-                          <span className="text-xs text-gray-700 font-medium">{client.targetCountries || '未填写'}</span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">意向院校</span>
-                          <span className="text-xs text-gray-700 font-medium text-right max-w-[60%]">{client.targetUniversities || '未填写'}</span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">目标专业</span>
-                          <span className="text-xs text-gray-700 font-medium">{client.targetDepartment || '未填写'}</span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">入学时间</span>
-                          <span className="text-xs text-gray-700 font-medium">{client.entryYear || '未填写'}</span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">奖学金要求</span>
-                          <span className="text-xs text-gray-700 font-medium">{client.scholarshipRequirement || '未填写'}</span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">排除项</span>
-                          <span className="text-xs text-gray-700 font-medium">{client.exclusions || '未填写'}</span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">特殊要求</span>
-                          <span className="text-xs text-gray-700 font-medium text-right max-w-[60%]">{client.specialRequirements || '未填写'}</span>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">择导类型/数量</span>
-                          <span className="text-xs text-gray-700 font-medium">{client.selectionType || '未填写'} / {client.selectionCount || '0'}个</span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">截止时间</span>
-                          <span className="text-xs text-gray-700 font-medium">{client.selectionDeadline || '未填写'}</span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">业务负责人</span>
-                          <span className="text-xs text-gray-700 font-medium">{client.businessCoordinator || '未填写'}</span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">RP/CV 状态</span>
-                          <span className="text-xs text-gray-700 font-medium">
-                            {client.hasRP ? '有RP' : '无RP'} / {client.hasCV ? '有CV' : '无CV'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">RP 题目/方向</span>
-                          <span className="text-xs text-gray-700 font-medium text-right max-w-[60%]">{client.rpTopic || '未填写'}</span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">排名偏好</span>
-                          <span className="text-xs text-gray-700 font-medium">{client.rankingPreference || '未填写'}</span>
-                        </div>
-                        <div className="flex justify-between py-1 border-b border-gray-50">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">接受交叉学科</span>
-                          <span className="text-xs text-gray-700 font-medium">{client.acceptCrossDiscipline ? '是' : '否'}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </InfoCard>
-                </div>
-
-                {/* Timeline Card */}
-                {renderTimeline()}
-
-                <InfoCard 
-                  icon={BookOpen} 
-                  title="教育经历"  
-                  onAdd={() => setActiveModal('education')}
-                  items={client.educations}
-                  renderItem={(edu) => (
-                    <div key={edu.id} className="p-3 bg-gray-50 rounded-xl space-y-1">
-                      <div className="flex justify-between items-start">
-                        <div className="text-xs font-bold text-gray-900">{edu.school}</div>
-                        <div className="text-[10px] text-gray-400">{edu.startDate} - {edu.endDate}</div>
-                      </div>
-                      <div className="text-[10px] text-gray-500">{edu.degree} · {edu.major}</div>
-                    </div>
-                  )}
-                />
-                <InfoCard 
-                  icon={Briefcase} 
-                  title="工作经历" 
-                  onAdd={() => setActiveModal('work')}
-                  items={client.works}
-                  renderItem={(work) => (
-                    <div key={work.id} className="p-3 bg-gray-50 rounded-xl space-y-1">
-                      <div className="flex justify-between items-start">
-                        <div className="text-xs font-bold text-gray-900">{work.company}</div>
-                        <div className="text-[10px] text-gray-400">{work.startDate} - {work.endDate}</div>
-                      </div>
-                      <div className="text-[10px] text-gray-500">{work.position}</div>
-                    </div>
-                  )}
-                />
-                <InfoCard 
-                  icon={Trophy} 
-                  title={`奖项 (${client.awards?.length || 0})`} 
-                  onAdd={() => setActiveModal('award')}
-                  items={client.awards}
-                  renderItem={(award) => (
-                    <div key={award.id} className="p-3 bg-gray-50 rounded-xl space-y-1">
-                      <div className="flex justify-between items-start">
-                        <div className="text-xs font-bold text-gray-900">{award.name}</div>
-                        <div className="text-[10px] text-gray-400">{award.date}</div>
-                      </div>
-                      <div className="text-[10px] text-gray-500">{award.level}</div>
-                    </div>
-                  )}
-                />
-                <div ref={academicRef}>
-                  <InfoCard icon={GraduationCap} title="学术成就">
-                    <EditableField 
-                      placeholder="点击输入内容..." 
-                      value={client.academicAchievements}
-                      onChange={(val) => onUpdateClient({ ...client, academicAchievements: val })}
-                    />
-                  </InfoCard>
-                </div>
-                <div ref={extracurricularRef}>
-                  <InfoCard icon={Target} title="课外活动">
-                    <EditableField 
-                      placeholder="点击输入内容..." 
-                      value={client.extracurriculars}
-                      onChange={(val) => onUpdateClient({ ...client, extracurriculars: val })}
-                    />
-                  </InfoCard>
-                </div>
-                <div ref={interestsRef}>
-                  <InfoCard icon={Heart} title="个人兴趣和爱好">
-                    <EditableField 
-                      placeholder="点击输入内容..." 
-                      value={client.interests}
-                      onChange={(val) => onUpdateClient({ ...client, interests: val })}
-                    />
-                  </InfoCard>
-                </div>
-                <div ref={careerRef}>
-                  <InfoCard icon={Briefcase} title="职业抱负">
-                    <EditableField 
-                      placeholder="点击输入内容..." 
-                      value={client.careerAspirations}
-                      onChange={(val) => onUpdateClient({ ...client, careerAspirations: val })}
-                    />
-                  </InfoCard>
-                </div>
-                <div ref={experiencesRef}>
-                  <InfoCard icon={Users} title="个人经验和挑战">
-                    <EditableField 
-                      placeholder="点击输入内容..." 
-                      value={client.experiencesAndChallenges}
-                      onChange={(val) => onUpdateClient({ ...client, experiencesAndChallenges: val })}
-                    />
-                  </InfoCard>
-                </div>
-                <div ref={skillsRef}>
-                  <InfoCard icon={Lightbulb} title="技能和素质">
-                    <EditableField 
-                      placeholder="点击输入内容..." 
-                      value={client.skillsAndQualities}
-                      onChange={(val) => onUpdateClient({ ...client, skillsAndQualities: val })}
-                    />
-                  </InfoCard>
-                </div>
-                <div ref={growthRef}>
-                  <InfoCard icon={Sparkles} title="个人成长和发展">
-                    <EditableField 
-                      placeholder="点击输入内容..." 
-                      value={client.growthAndDevelopment}
-                      onChange={(val) => onUpdateClient({ ...client, growthAndDevelopment: val })}
-                    />
-                  </InfoCard>
-                </div>
-                <InfoCard 
-                  icon={FileSearch} 
-                  title={`研究 & 论文 (${client.researchPapers?.length || 0})`} 
-                  onAdd={() => setActiveModal('research')}
-                  items={client.researchPapers}
-                  renderItem={(paper: any) => (
-                    <div key={paper.id} className="p-3 bg-gray-50 rounded-xl border border-gray-100">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <div className="font-bold text-gray-900 text-xs">{paper.title}</div>
-                          <div className="text-[10px] text-gray-500 mt-1">{paper.journal} · {paper.date}</div>
-                        </div>
-                        {paper.link && (
-                          <a href={paper.link} target="_blank" rel="noopener noreferrer" className="text-cyan-500 hover:text-cyan-600">
-                            <LinkIcon size={14} />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                />
-                <InfoCard 
-                  icon={ShieldCheck} 
-                  title={`身份证明 (${client.identityDocs?.length || 0})`} 
-                  onAdd={() => setActiveModal('identity')}
-                  items={client.identityDocs}
-                  renderItem={(doc: any) => (
-                    <div key={doc.id} className="p-3 bg-gray-50 rounded-xl border border-gray-100">
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <div className="font-bold text-gray-900 text-xs">{doc.type}</div>
-                          <div className="text-[10px] text-gray-500 mt-1">{doc.number}</div>
-                        </div>
-                        <div className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-lg">
-                          有效期: {doc.expiry}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                />
-              </div>
-
-              {/* Add Block */}
-              <div className="relative" ref={addInfoMenuRef}>
-                <button 
-                  onClick={() => setShowAddInfoMenu(!showAddInfoMenu)}
-                  className="w-full py-12 border-2 border-dashed border-gray-100 rounded-2xl flex flex-col items-center justify-center text-gray-300 hover:border-cyan-200 hover:text-cyan-400 transition-all bg-white/50 group"
-                >
-                  <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-4 group-hover:bg-cyan-50 transition-colors">
-                    <Plus size={24} />
+            <div className="space-y-6">
+              <Panel title="联系与材料状态" icon={<Mail size={18} />}>
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-sm font-semibold text-slate-700">
+                    <div className="flex items-center gap-2"><Phone size={14} />{client.contact || '未填写主联系方式'}</div>
                   </div>
-                  <span className="text-sm font-bold text-gray-400 group-hover:text-cyan-600">添加信息块</span>
-                  <span className="text-[10px] text-gray-300 mt-1">自定义标题和内容</span>
-                </button>
-                {showAddInfoMenu && (
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50 animate-in fade-in zoom-in duration-200">
-                    {[
-                      { label: '学术成就', ref: academicRef },
-                      { label: '课外活动', ref: extracurricularRef },
-                      { label: '个人兴趣', ref: interestsRef },
-                      { label: '职业目标', ref: careerRef },
-                      { label: '经历与挑战', ref: experiencesRef },
-                      { label: '技能与特质', ref: skillsRef },
-                      { label: '成长与发展', ref: growthRef },
-                    ].map((item) => (
-                      <button 
-                        key={item.label}
-                        onClick={() => scrollToSection(item.ref)}
-                        className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"
-                      >
-                        {item.label}
-                      </button>
+                  <FieldList
+                    rows={[
+                      { label: 'RP', value: boolLabel(selectionProfile.hasRP) },
+                      { label: 'CV', value: boolLabel(selectionProfile.hasCV) },
+                      { label: '论文 / 发表', value: boolLabel(selectionProfile.hasPublications) },
+                      { label: 'RP 主题', value: selectionProfile.rpTopic },
+                    ]}
+                  />
+                </div>
+              </Panel>
+
+              <Panel title="AI 背景分析" icon={<Sparkles size={18} />} action={<button onClick={handleGenerateAnalysis} disabled={isAnalysisLoading} className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-60">{isAnalysisLoading ? '生成中...' : '重新生成'}</button>}>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 text-sm leading-7 text-slate-700 whitespace-pre-wrap">
+                  {analysis || '点击“重新生成”可基于当前学生信息生成背景提升建议。'}
+                </div>
+              </Panel>
+
+              <Panel title="关键时间线" icon={<CalendarClock size={18} />}>
+                {upcomingEvents.length > 0 ? (
+                  <div className="space-y-3">
+                    {upcomingEvents.map((item) => (
+                      <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3">
+                        <div className="text-sm font-black text-slate-900">{item.title}</div>
+                        <div className="mt-1 text-sm text-slate-600">{item.date}{item.time ? ` ${item.time}` : ''}</div>
+                        {item.description ? <div className="mt-2 text-sm text-slate-600">{item.description}</div> : null}
+                      </div>
                     ))}
                   </div>
+                ) : (
+                  <EmptyBlock title="暂无关键日程" description="DDL、面试和提醒会在这里集中展示。" />
                 )}
-              </div>
-            </div>
-
-            {/* Right Column - Sidebar Info */}
-            <div className="col-span-4 space-y-6">
-              <InfoCard 
-                icon={Phone} 
-                title="联系方式" 
-                onAdd={() => setShowContactMenu(!showContactMenu)}
-                items={client.contacts}
-                renderItem={(contact) => (
-                  <div key={contact.id} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-xl">
-                    <div className="text-cyan-500">
-                      {contact.type === 'phone' ? <Phone size={14} /> : <MapPin size={14} />}
-                    </div>
-                    <div className="text-xs text-gray-700 font-medium">{contact.value}</div>
-                  </div>
-                )}
-              />
-              
-              <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
-                <h4 className="text-sm font-bold text-gray-900 mb-4 flex items-center">
-                  <Sparkles size={16} className="mr-2 text-cyan-500" />
-                  AI 智能分析
-                </h4>
-                <div className="space-y-4">
-                  <div className="p-4 bg-gray-50 rounded-xl min-h-[100px]">
-                    {aiAnalysis ? (
-                      <div className="prose prose-sm max-w-none text-xs text-gray-600">
-                        <ReactMarkdown>{aiAnalysis}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-gray-500 leading-relaxed">
-                        基于当前档案，该学生在<span className="text-cyan-600 font-bold">学术研究</span>方面表现突出，建议在文书中重点突出其在实验室的经历。
-                      </p>
-                    )}
-                  </div>
-                  <button 
-                    onClick={handleGenerateAnalysis}
-                    disabled={isAnalyzing}
-                    className="w-full py-2.5 bg-gray-900 text-white rounded-xl text-xs font-bold hover:bg-gray-800 transition-all disabled:opacity-50 flex items-center justify-center"
-                  >
-                    {isAnalyzing ? (
-                      <>
-                        <Sparkles size={14} className="mr-2 animate-spin" />
-                        分析中...
-                      </>
-                    ) : (
-                      '生成背景提升建议'
-                    )}
-                  </button>
-                </div>
-              </div>
+              </Panel>
             </div>
           </div>
-        )}
+        ) : null}
 
-        {activeTab === 'documents' && (
-          <div className="space-y-6">
-            {client.documents && client.documents.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {client.documents.map((doc) => (
-                  <div key={doc.id} className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-all group">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="p-3 bg-gray-50 rounded-xl text-gray-400 group-hover:bg-cyan-50 group-hover:text-cyan-500 transition-colors">
-                        <FileText size={24} />
+        {activeTab === 'documents' ? (
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_360px]">
+            <Panel title="申请材料" icon={<FileText size={18} />}>
+              {documents.length > 0 ? (
+                <div className="space-y-3">
+                  {documents.map((doc) => (
+                    <div key={doc.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-4">
+                      <div>
+                        <div className="text-sm font-black text-slate-900">{doc.title}</div>
+                        <div className="mt-1 text-xs font-semibold text-slate-500">{doc.type} · 更新于 {formatDate(doc.updatedAt)}</div>
                       </div>
-                      <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                        {doc.type}
-                      </div>
-                    </div>
-                    <h4 className="text-sm font-bold text-gray-900 mb-2 line-clamp-1">{doc.title}</h4>
-                    <p className="text-xs text-gray-500 line-clamp-3 mb-4 leading-relaxed">
-                      {doc.content}
-                    </p>
-                    <div className="flex items-center justify-between pt-4 border-t border-gray-50">
-                      <span className="text-[10px] text-gray-400">
-                        {new Date(doc.createdAt).toLocaleDateString()}
-                      </span>
-                      <div className="flex items-center space-x-2">
-                        <button 
-                          onClick={() => handleDownloadDocument(doc)}
-                          className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
-                          title="下载"
-                        >
-                          <Download size={14} />
-                        </button>
-                        <button 
-                          onClick={() => handleDeleteDocument(doc.id)}
-                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                          title="删除"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                        <button 
-                          onClick={() => onEditDocument(doc)}
-                          className="text-xs font-bold text-cyan-600 hover:text-cyan-700 transition-colors ml-2"
-                        >
-                          查看详情
-                        </button>
+                      <div className="flex gap-2">
+                        <button onClick={() => onEditDocument(doc)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">编辑</button>
+                        <button onClick={() => onStartWriting(documentTypeToAction[doc.type] || '自由写作')} className="rounded-xl bg-slate-950 px-3 py-2 text-sm font-bold text-white hover:bg-slate-800">继续写作</button>
                       </div>
                     </div>
-                  </div>
-                ))}
-                {/* Add New Document Card */}
-                <div className="relative">
-                  <button 
-                    onClick={() => setShowWritingMenu(!showWritingMenu)}
-                    className="w-full h-full bg-white rounded-2xl border-2 border-dashed border-gray-100 p-6 flex flex-col items-center justify-center text-gray-300 hover:border-cyan-200 hover:text-cyan-400 transition-all group min-h-[200px]"
-                  >
-                    <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-4 group-hover:bg-cyan-50 transition-colors">
-                      <Plus size={24} />
-                    </div>
-                    <span className="text-sm font-bold text-gray-400 group-hover:text-cyan-600">新建文档</span>
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm min-h-[500px] flex flex-col items-center justify-center p-12 text-center">
-                <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center text-gray-300 mb-6">
-                  <FileText size={40} />
-                </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">暂无文档</h3>
-                <p className="text-sm text-gray-400 mb-8 max-w-xs">
-                  这里还没有创建任何文档。开始创建您的第一个文档吧！
-                </p>
-                <div className="relative">
-                  <button 
-                    onClick={() => setShowWritingMenu(!showWritingMenu)}
-                    className="flex items-center px-8 py-3 bg-cyan-500 text-white rounded-xl text-sm font-bold hover:bg-cyan-600 transition-all shadow-xl shadow-cyan-100 active:scale-95"
-                  >
-                    <Plus size={20} className="mr-2" />
-                    新建文档
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'mentors' && (
-          <div className="space-y-6">
-            {client.linkedFacultyIds && client.linkedFacultyIds.length > 0 ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {facultyDatabase
-                  .filter(f => client.linkedFacultyIds?.includes(f.id))
-                  .map(faculty => (
-                    <FacultyCard
-                      key={faculty.id}
-                      prof={faculty}
-                      isDatabaseView={true}
-                      isLinked={true}
-                      onUnlink={() => onUnlinkFacultyFromClient?.(faculty.id, client.id)}
-                      linkedClientCount={faculty.linkedClientIds?.length || 0}
-                    />
                   ))}
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm min-h-[400px] flex flex-col items-center justify-center p-12 text-center">
-                <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center text-gray-300 mb-6">
-                  <UserCheck size={40} />
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">暂无推荐导师</h3>
-                <p className="text-sm text-gray-400 mb-8 max-w-xs">
-                  还没有为该学生推荐任何导师。请前往导师库或智能匹配进行推荐。
-                </p>
+              ) : (
+                <EmptyBlock title="暂无申请材料" description="这里会集中展示学生当前的 PS、CV、推荐信和命题作文。" />
+              )}
+            </Panel>
+
+            <Panel title="快捷开始" icon={<BookOpen size={18} />}>
+              <div className="space-y-2">
+                {['文书Agent', '写PS', '写命题文书', '写推荐信', '写CV', '自由写作'].map((item) => (
+                  <button key={item} onClick={() => onStartWriting(item)} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-left hover:bg-slate-100">
+                    <span className="font-bold text-slate-800">{item}</span>
+                    <Plus size={16} className="text-slate-500" />
+                  </button>
+                ))}
               </div>
-            )}
+            </Panel>
           </div>
-        )}
+        ) : null}
+
+        {activeTab === 'mentors' ? (
+          <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+            <Panel title="导师筛选侧板" icon={<Search size={18} />} className="h-fit">
+              <div className="space-y-3">
+                {[
+                  ['国家 / 地区', 'country'],
+                  ['学校', 'university'],
+                  ['学院 / School', 'school'],
+                  ['系 / Department', 'department'],
+                  ['专业 / 关键词', 'major'],
+                  ['导师搜索词', 'keyword'],
+                  ['项目关键词', 'projectKeyword'],
+                ].map(([label, key]) => (
+                  <label key={key} className="block space-y-2">
+                    <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{label}</div>
+                    <input
+                      value={pickerFilters[key as keyof PickerFilters] as string}
+                      onChange={(event) => setPickerFilters((current) => ({ ...current, [key]: event.target.value }))}
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+                    />
+                  </label>
+                ))}
+
+                <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-sm font-semibold text-slate-700">
+                  <input type="checkbox" checked={pickerFilters.hasScholarship} onChange={(event) => setPickerFilters((current) => ({ ...current, hasScholarship: event.target.checked }))} />
+                  仅显示有奖学金信息的导师
+                </label>
+
+                <select value={pickerFilters.degreeType} onChange={(event) => setPickerFilters((current) => ({ ...current, degreeType: event.target.value as PickerFilters['degreeType'] }))} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-50">
+                  <option value="unspecified">未指定</option>
+                  <option value="phd">申博</option>
+                  <option value="master">申硕</option>
+                </select>
+
+                <div className="flex gap-2">
+                  <button onClick={() => { setPickerFilters(EMPTY_PICKER_FILTERS); setPickerSelectedIds([]); }} className="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50">重置</button>
+                  <button onClick={() => setMentorPickerOpen((current) => !current)} className="flex-1 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white hover:bg-slate-800">{mentorPickerOpen ? '收起结果' : '打开筛选结果'}</button>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-sm text-slate-600">
+                  匹配到 <strong className="text-slate-900">{mentorPickerResults.length}</strong> 位本地导师，可直接多选添加。
+                </div>
+              </div>
+            </Panel>
+
+            <Panel title="推荐导师" icon={<UserRoundPlus size={18} />} action={<div className="flex flex-wrap gap-2">
+              <button onClick={() => setMentorPickerOpen((current) => !current)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">从导师库添加</button>
+              <button onClick={() => onOpenAdvancedFacultyFilters?.(client)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100">高级筛选</button>
+              <button onClick={handleEvaluateMentors} className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800">一键评估</button>
+              <button onClick={handleRemoveSelectedMentors} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-100">批量移除</button>
+            </div>}>
+              {mentorPickerOpen ? (
+                <div className="mb-5 rounded-[28px] border border-blue-100 bg-blue-50/60 p-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-black text-slate-900">本地导师快速添加</div>
+                      <div className="text-xs font-semibold text-slate-500">支持按国家、学校、学院、专业和项目关键词筛选后直接挂到当前学生。</div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => setPickerSelectedIds(mentorPickerResults.map((faculty) => faculty.id))} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">全选结果</button>
+                      <button onClick={handleAddSelectedMentors} disabled={pickerSelectedIds.length === 0} className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-50">添加 {pickerSelectedIds.length} 位导师</button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {mentorPickerResults.slice(0, 10).map((faculty) => (
+                      <label key={faculty.id} className={`flex items-start gap-3 rounded-2xl border px-4 py-4 ${pickerSelectedIds.includes(faculty.id) ? 'border-blue-300 bg-white' : 'border-slate-200 bg-white/80'}`}>
+                        <input type="checkbox" checked={pickerSelectedIds.includes(faculty.id)} onChange={() => setPickerSelectedIds((current) => current.includes(faculty.id) ? current.filter((item) => item !== faculty.id) : [...current, faculty.id])} className="mt-1" />
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-black text-slate-900">{faculty.name}</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-600">{faculty.university}</div>
+                          <div className="mt-2 text-xs leading-5 text-slate-500">{[faculty.country, faculty.school, faculty.department].filter(Boolean).join(' · ') || '未补充层级信息'}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {recommendedFaculty.length > 0 ? (
+                <div className="space-y-5">
+                  {recommendedFaculty.map((faculty) => {
+                    const recommendation = recommendationMap.get(faculty.id);
+                    const summary = summarizeRecommendation(recommendation, faculty.matchScore || 0);
+                    return (
+                      <div key={faculty.id} className="space-y-3">
+                        <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-500">
+                          <input type="checkbox" checked={selectedMentorIds.includes(faculty.id)} onChange={() => setSelectedMentorIds((current) => current.includes(faculty.id) ? current.filter((item) => item !== faculty.id) : [...current, faculty.id])} />
+                          选择该导师
+                        </label>
+                        <FacultyCard prof={{ ...faculty, evaluation: recommendation?.evaluation || faculty.evaluation }} isDatabaseView={true} onUnlink={() => onUnlinkFacultyFromClient?.(faculty.id, client.id)} />
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4">
+                          <div className="text-lg font-black text-slate-900">{summary.score} 分 · {summary.bandLabel}</div>
+                          <div className="mt-2 text-sm font-semibold leading-6 text-slate-700">{summary.summary}</div>
+                          {summary.reasons.length > 0 ? <div className="mt-3 flex flex-wrap gap-2">{summary.reasons.slice(0, 4).map((item) => <span key={item} className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{item}</span>)}</div> : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyBlock title="暂无推荐导师" description="可以先用左侧筛板快速添加，也可以点击“高级筛选”跳到导师库精筛后回填。" />
+              )}
+            </Panel>
+          </div>
+        ) : null}
       </div>
 
-      {/* Modals */}
-      <Modal isOpen={activeModal === 'basicInfo'} onClose={() => setActiveModal(null)} onConfirm={handleUpdateBasicInfo} title="修改基本信息">
-        <div className="space-y-4">
-          <InputField 
-            label="学生姓名" 
-            placeholder="请输入学生姓名" 
-            value={basicInfoForm.name}
-            onChange={val => setBasicInfoForm({ ...basicInfoForm, name: val })}
-          />
-          <InputField 
-            label="择导老师" 
-            placeholder="请输入老师姓名" 
-            value={basicInfoForm.advisor}
-            onChange={val => setBasicInfoForm({ ...basicInfoForm, advisor: val })}
-          />
-          <InputField 
-            label="总 GPA" 
-            placeholder="例如: 3.8/4.0" 
-            value={basicInfoForm.gpa}
-            onChange={val => setBasicInfoForm({ ...basicInfoForm, gpa: val })}
-          />
-        </div>
-      </Modal>
-
-      <Modal isOpen={activeModal === 'event'} onClose={() => setActiveModal(null)} onConfirm={handleSaveEvent} title={eventForm.id ? "编辑事件" : "添加事件"}>
-        <div className="space-y-4">
-          <InputField 
-            label="事件标题 (必填)" 
-            placeholder="例如: 帝国理工 DDL" 
-            value={eventForm.title}
-            onChange={val => setEventForm({ ...eventForm, title: val })}
-          />
-          <div className="grid grid-cols-2 gap-4">
-            <InputField 
-              label="日期 (必填)" 
-              type="date" 
-              value={eventForm.date}
-              onChange={val => setEventForm({ ...eventForm, date: val })}
-            />
-            <InputField 
-              label="时间 (可选)" 
-              type="time" 
-              value={eventForm.time}
-              onChange={val => setEventForm({ ...eventForm, time: val })}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider ml-1">事件类型</label>
-            <div className="relative">
-              <select 
-                value={eventForm.type}
-                onChange={e => setEventForm({ ...eventForm, type: e.target.value as any })}
-                className="w-full appearance-none bg-gray-50 border-none rounded-xl px-4 py-3 text-sm text-gray-700 focus:ring-2 focus:ring-cyan-500 transition-all cursor-pointer"
-              >
-                <option value="deadline">截止日期 (Deadline)</option>
-                <option value="interview">面试 (Interview)</option>
-                <option value="submission">材料提交 (Submission)</option>
-                <option value="meeting">会议/沟通 (Meeting)</option>
-                <option value="reminder">提醒 (Reminder)</option>
-                <option value="other">其他 (Other)</option>
-              </select>
-              <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider ml-1">优先级</label>
-            <div className="flex space-x-2">
-              <button 
-                onClick={() => setEventForm({ ...eventForm, priority: 'high' })}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${eventForm.priority === 'high' ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}
-              >
-                高
-              </button>
-              <button 
-                onClick={() => setEventForm({ ...eventForm, priority: 'medium' })}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${eventForm.priority === 'medium' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}
-              >
-                中
-              </button>
-              <button 
-                onClick={() => setEventForm({ ...eventForm, priority: 'low' })}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${eventForm.priority === 'low' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}
-              >
-                低
+      {isSelectionModalOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 px-4 py-8 backdrop-blur-sm">
+          <div className="w-full max-w-5xl overflow-hidden rounded-[32px] border border-white/60 bg-white shadow-[0_32px_120px_rgba(15,23,42,0.18)]">
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+              <div>
+                <div className="text-lg font-black text-slate-950">编辑择导档案</div>
+                <div className="text-sm text-slate-500">学生档案和智能导师检索会共用这套结构化字段。</div>
+              </div>
+              <button onClick={() => setIsSelectionModalOpen(false)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                <X size={18} />
               </button>
             </div>
-          </div>
-          <InputField 
-            label="备注 (可选)" 
-            type="textarea"
-            placeholder="请输入备注信息" 
-            value={eventForm.description}
-            onChange={val => setEventForm({ ...eventForm, description: val })}
-          />
-        </div>
-      </Modal>
+            <div className="max-h-[78vh] overflow-y-auto px-6 py-6">
+              <div className="grid gap-4 xl:grid-cols-2">
+                {[
+                  ['目标国家 / 地区', 'countries'],
+                  ['目标学校', 'universities'],
+                  ['学院 / 系', 'departments'],
+                  ['专业', 'majors'],
+                  ['专业 A', 'majorA'],
+                  ['专业 B', 'majorB'],
+                  ['目标职级', 'targetPosition'],
+                  ['入学年份', 'entryYear'],
+                  ['目标数量', 'selectionCount'],
+                  ['筛选类型', 'selectionType'],
+                  ['筛选截止时间', 'selectionDeadline'],
+                  ['奖学金要求', 'scholarshipRequirement'],
+                  ['排名偏好', 'rankingPreference'],
+                  ['排除项', 'exclusions'],
+                  ['特殊要求', 'specialRequirements'],
+                  ['业务备注', 'businessCoordinator'],
+                  ['指定院校链接', 'officialLinks'],
+                  ['避免重复导师', 'avoidPreviousMentors'],
+                  ['RP 主题', 'rpTopic'],
+                ].map(([label, key]) => (
+                  <label key={key} className={`block space-y-2 ${['countries', 'universities', 'departments', 'majors', 'rankingPreference', 'exclusions', 'specialRequirements', 'businessCoordinator', 'officialLinks', 'avoidPreviousMentors'].includes(key) ? 'xl:col-span-2' : ''}`}>
+                    <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{label}</div>
+                    {['countries', 'universities', 'departments', 'majors', 'rankingPreference', 'exclusions', 'specialRequirements', 'businessCoordinator', 'officialLinks', 'avoidPreviousMentors'].includes(key) ? (
+                      <textarea value={profileDraft[key as keyof typeof profileDraft] as string} onChange={(event) => updateProfileDraft(key as keyof typeof profileDraft, event.target.value)} rows={3} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-50" />
+                    ) : (
+                      <input value={profileDraft[key as keyof typeof profileDraft] as string} onChange={(event) => updateProfileDraft(key as keyof typeof profileDraft, event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-50" />
+                    )}
+                  </label>
+                ))}
 
-      <Modal isOpen={activeModal === 'education'} onClose={() => setActiveModal(null)} onConfirm={handleAddEducation} title="添加教育经历">
-        <div className="space-y-4">
-          <InputField 
-            label="学校名称" 
-            placeholder="请输入学校名称" 
-            value={eduForm.school}
-            onChange={val => setEduForm({ ...eduForm, school: val })}
-          />
-          <InputField 
-            label="教育程度" 
-            selectOptions={['高中', '本科', '硕士', '博士', '其他']} 
-            value={eduForm.degree}
-            onChange={val => setEduForm({ ...eduForm, degree: val })}
-          />
-          <InputField 
-            label="专业" 
-            placeholder="请输入专业" 
-            value={eduForm.major}
-            onChange={val => setEduForm({ ...eduForm, major: val })}
-          />
-          <InputField 
-            label="GPA" 
-            placeholder="0" 
-            value={eduForm.gpa}
-            onChange={val => setEduForm({ ...eduForm, gpa: val })}
-          />
-          <InputField 
-            label="额外信息" 
-            placeholder="请输入额外信息" 
-            value={eduForm.extraInfo}
-            onChange={val => setEduForm({ ...eduForm, extraInfo: val })}
-          />
-          <InputField 
-            label="备注" 
-            placeholder="请输入备注" 
-            value={eduForm.notes}
-            onChange={val => setEduForm({ ...eduForm, notes: val })}
-          />
-          <div className="grid grid-cols-2 gap-4">
-            <InputField 
-              label="开始日期" 
-              type="date" 
-              value={eduForm.startDate}
-              onChange={val => setEduForm({ ...eduForm, startDate: val })}
-            />
-            <InputField 
-              label="结束日期" 
-              type="date" 
-              value={eduForm.endDate}
-              onChange={val => setEduForm({ ...eduForm, endDate: val })}
-            />
-          </div>
-        </div>
-      </Modal>
+                <div className="grid gap-3 sm:grid-cols-2 xl:col-span-2">
+                  <select value={profileDraft.degreeType} onChange={(event) => updateProfileDraft('degreeType', event.target.value)} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-50">
+                    <option value="unspecified">未指定</option>
+                    <option value="phd">申博</option>
+                    <option value="master">申硕</option>
+                  </select>
+                  <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-sm font-semibold text-slate-700">
+                    <input type="checkbox" checked={profileDraft.crossDiscipline} onChange={(event) => updateProfileDraft('crossDiscipline', event.target.checked)} />
+                    勾选后按交叉学科处理专业 A 与专业 B
+                  </label>
+                </div>
 
-      <Modal isOpen={activeModal === 'work'} onClose={() => setActiveModal(null)} onConfirm={handleAddWork} title="添加工作经历">
-        <div className="space-y-4">
-          <InputField 
-            label="公司名称" 
-            placeholder="请输入公司名称" 
-            value={workForm.company}
-            onChange={val => setWorkForm({ ...workForm, company: val })}
-          />
-          <InputField 
-            label="职位" 
-            placeholder="请输入职位" 
-            value={workForm.position}
-            onChange={val => setWorkForm({ ...workForm, position: val })}
-          />
-          <div className="grid grid-cols-2 gap-4">
-            <InputField 
-              label="开始日期" 
-              type="date" 
-              value={workForm.startDate}
-              onChange={val => setWorkForm({ ...workForm, startDate: val })}
-            />
-            <InputField 
-              label="结束日期" 
-              type="date" 
-              value={workForm.endDate}
-              onChange={val => setWorkForm({ ...workForm, endDate: val })}
-            />
-          </div>
-          <InputField 
-            label="工作描述" 
-            type="textarea" 
-            placeholder="请输入工作描述" 
-            value={workForm.description}
-            onChange={val => setWorkForm({ ...workForm, description: val })}
-          />
-        </div>
-      </Modal>
-
-      <Modal isOpen={activeModal === 'award'} onClose={() => setActiveModal(null)} onConfirm={handleAddAward} title="添加奖项">
-        <div className="space-y-4">
-          <InputField 
-            label="奖项名称" 
-            placeholder="请输入奖项名称" 
-            value={awardForm.name}
-            onChange={val => setAwardForm({ ...awardForm, name: val })}
-          />
-          <InputField 
-            label="奖项范围" 
-            selectOptions={['学校级', '城市级', '省级', '国家级', '国际级']} 
-            value={awardForm.level}
-            onChange={val => setAwardForm({ ...awardForm, level: val })}
-          />
-          <InputField 
-            label="获得日期" 
-            type="date" 
-            value={awardForm.date}
-            onChange={val => setAwardForm({ ...awardForm, date: val })}
-          />
-          <InputField 
-            label="描述" 
-            type="textarea" 
-            placeholder="请输入奖项描述" 
-            value={awardForm.description}
-            onChange={val => setAwardForm({ ...awardForm, description: val })}
-          />
-        </div>
-      </Modal>
-
-      <Modal isOpen={activeModal === 'contact'} onClose={() => setActiveModal(null)} onConfirm={handleAddContact} title={contactForm.type === 'phone' ? '添加联系方式' : '添加地址'}>
-        <div className="space-y-4">
-          <InputField 
-            label="类型" 
-            selectOptions={['phone', 'email', 'address']} 
-            value={contactForm.type}
-            onChange={val => setContactForm({ ...contactForm, type: val as any })}
-          />
-          <InputField 
-            label="内容" 
-            placeholder={contactForm.type === 'phone' ? '请输入电话' : contactForm.type === 'email' ? '请输入邮箱' : '请输入地址'} 
-            type={contactForm.type === 'phone' ? 'tel' : contactForm.type === 'email' ? 'email' : 'text'}
-            value={contactForm.value}
-            onChange={val => setContactForm({ ...contactForm, value: val })}
-          />
-        </div>
-      </Modal>
-
-      <Modal isOpen={activeModal === 'research'} onClose={() => setActiveModal(null)} onConfirm={handleAddResearch} title="添加研究 & 论文">
-        <div className="space-y-4">
-          <InputField 
-            label="论文标题" 
-            placeholder="请输入论文标题" 
-            value={researchForm.title}
-            onChange={val => setResearchForm({ ...researchForm, title: val })}
-          />
-          <InputField 
-            label="期刊/会议" 
-            placeholder="请输入发表期刊或会议" 
-            value={researchForm.journal}
-            onChange={val => setResearchForm({ ...researchForm, journal: val })}
-          />
-          <InputField 
-            label="发表日期" 
-            type="date"
-            value={researchForm.date}
-            onChange={val => setResearchForm({ ...researchForm, date: val })}
-          />
-          <InputField 
-            label="DOI / 链接" 
-            placeholder="请输入链接" 
-            value={researchForm.link}
-            onChange={val => setResearchForm({ ...researchForm, link: val })}
-          />
-        </div>
-      </Modal>
-
-      <Modal isOpen={activeModal === 'identity'} onClose={() => setActiveModal(null)} onConfirm={handleAddIdentity} title="添加身份证明">
-        <div className="space-y-4">
-          <InputField 
-            label="证件类型" 
-            selectOptions={['身份证', '护照', '签证', '其他']} 
-            value={identityForm.type}
-            onChange={val => setIdentityForm({ ...identityForm, type: val })}
-          />
-          <InputField 
-            label="证件号码" 
-            placeholder="请输入证件号码" 
-            value={identityForm.number}
-            onChange={val => setIdentityForm({ ...identityForm, number: val })}
-          />
-          <InputField 
-            label="有效期" 
-            type="date"
-            value={identityForm.expiry}
-            onChange={val => setIdentityForm({ ...identityForm, expiry: val })}
-          />
-        </div>
-      </Modal>
-
-      <Modal isOpen={activeModal === 'avatar'} onClose={() => setActiveModal(null)} onConfirm={handleUpdateAvatar} title="修改头像">
-        <div className="space-y-4">
-          <div className="flex justify-center mb-4">
-            <div className="relative group cursor-pointer w-24 h-24 rounded-full bg-gray-100 border-4 border-white shadow-lg overflow-hidden transition-transform hover:scale-105" onClick={() => avatarInputRef.current?.click()}>
-              <img 
-                src={avatarUrlInput || client.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${client.name}`} 
-                alt="preview" 
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <Upload size={24} className="text-white" />
+                <div className="grid gap-3 sm:grid-cols-3 xl:col-span-2">
+                  {[
+                    ['hasRP', '已准备 RP'],
+                    ['hasCV', '已准备 CV'],
+                    ['hasPublications', '已准备论文 / 发表'],
+                  ].map(([key, label]) => (
+                    <label key={key} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-sm font-semibold text-slate-700">
+                      <input type="checkbox" checked={Boolean(profileDraft[key as keyof typeof profileDraft])} onChange={(event) => updateProfileDraft(key as keyof typeof profileDraft, event.target.checked)} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
               </div>
             </div>
-            <input 
-              type="file" 
-              ref={avatarInputRef}
-              onChange={handleAvatarUpload}
-              className="hidden"
-              accept="image/*"
-            />
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
+              <button onClick={() => setIsSelectionModalOpen(false)} className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50">取消</button>
+              <button onClick={handleSaveSelectionProfile} className="rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800">保存更新</button>
+            </div>
           </div>
-          <InputField 
-            label="头像 URL" 
-            placeholder="请输入图片 URL (支持 http/https) 或点击上方上传" 
-            value={avatarUrlInput}
-            onChange={val => setAvatarUrlInput(val)}
-          />
-          <p className="text-xs text-gray-400 text-center">
-            留空则使用默认生成的卡通头像
-          </p>
         </div>
-      </Modal>
+      ) : null}
+
+      {toast ? (
+        <div className="fixed bottom-6 right-6 z-[95] rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-800 shadow-2xl">
+          {toast}
+        </div>
+      ) : null}
     </div>
   );
 };

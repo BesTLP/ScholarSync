@@ -1,14 +1,368 @@
 
-import { GoogleGenAI, Type, Schema, Chat } from "@google/genai";
+import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { FacultyMember, ImageSize, TargetOption, Client } from "../types";
+import { getRuntimeConfig } from "./persistentStorage";
 
-// Initialize the client
-const getClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+type Provider = 'openai' | 'gemini';
 
-const MODEL_FACULTY_MATCHER = 'gemini-3.1-pro-preview';
-const MODEL_IMAGE_GEN = 'gemini-3.1-flash-image-preview';
-const MODEL_CHAT = 'gemini-3.1-pro-preview';
-const MODEL_FAST = 'gemini-3-flash-preview'; // Use Flash for fast text parsing
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_OPENAI_WEB_MODEL = 'gpt-5';
+
+export interface ChatSession {
+  sendMessage: (input: { message: string }) => Promise<{ text: string }>;
+}
+
+const getProviderOrder = (preferred?: Provider, fallback?: Provider): Provider[] => {
+  const config = getRuntimeConfig();
+  const first = preferred || config.preferredProvider || 'openai';
+  const second = fallback || config.fallbackProvider || 'gemini';
+  return Array.from(new Set([first, second]));
+};
+
+const isProviderConfigured = (provider: Provider) => {
+  const config = getRuntimeConfig();
+  return provider === 'openai' ? Boolean(config.openaiApiKey) : Boolean(config.geminiApiKey || process.env.GEMINI_API_KEY || process.env.API_KEY);
+};
+
+export const isOpenAIConfigured = () => isProviderConfigured('openai');
+export const isGeminiConfigured = () => isProviderConfigured('gemini');
+export const isAnyWebSearchProviderConfigured = () => isOpenAIConfigured() || isGeminiConfigured();
+
+const getConfiguredGeminiModel = (fallback: string = DEFAULT_GEMINI_MODEL) => {
+  const configured = getRuntimeConfig().geminiModel?.trim();
+  return configured || fallback;
+};
+
+const getGeminiSearchModel = () => getConfiguredGeminiModel(DEFAULT_GEMINI_MODEL);
+
+export const describeGeminiError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error || '');
+
+  if (message.includes('fetch failed') || message.includes('UND_ERR_CONNECT_TIMEOUT') || message.includes('Connect Timeout Error')) {
+    return '无法连接到 Gemini 服务，当前更像是网络超时或代理 / 防火墙拦截，而不是 API Key 问题。';
+  }
+
+  if (message.includes('No Gemini API key configured')) {
+    return '当前联网导师检索依赖 Gemini，请在设置页确认 Gemini API Key 已保存。';
+  }
+
+  if (message.includes('404') || message.includes('model')) {
+    return `当前联网导师检索模型不可用，请在设置页检查 Gemini 模型名。当前保存值：${getConfiguredGeminiModel()}`;
+  }
+
+  if (message.includes('401') || message.includes('403') || message.toLowerCase().includes('api key')) {
+    return 'Gemini API Key 无法通过校验，请在设置页重新保存后再试。';
+  }
+
+  return '联网导师检索暂时不可用，请稍后重试。';
+};
+
+export const describeWebSearchError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error || '');
+
+  if (message.includes('fetch failed') || message.includes('UND_ERR_CONNECT_TIMEOUT') || message.includes('Connect Timeout Error')) {
+    return '无法连接到 OpenAI 联网搜索服务，当前更像是网络超时或代理 / 防火墙拦截，而不是 API Key 问题。';
+  }
+
+  if (message.includes('No OpenAI API key configured')) {
+    return '当前联网导师检索优先依赖 OpenAI，请在设置页确认 OpenAI API Key 已保存。';
+  }
+
+  if (message.includes('OpenAI request failed (401)') || message.includes('OpenAI request failed (403)')) {
+    return 'OpenAI API Key 校验失败，导师联网检索无法继续。';
+  }
+
+  if (message.includes('OpenAI request failed (404)') || (message.toLowerCase().includes('openai') && message.toLowerCase().includes('model'))) {
+    return `OpenAI 联网检索模型不可用，请在设置页检查 OpenAI 模型名。当前保存值：${getRuntimeConfig().openaiModel || DEFAULT_OPENAI_WEB_MODEL}`;
+  }
+
+  if (message.toLowerCase().includes('all web search providers failed')) {
+    return message.replace(/^All web search providers failed:\s*/i, '');
+  }
+
+  return describeGeminiError(error);
+};
+
+const extractAllowedDomains = (...urls: Array<string | undefined>) =>
+  Array.from(
+    new Set(
+      urls
+        .flatMap((value) => {
+          if (!value) return [];
+          try {
+            return [new URL(value).hostname.replace(/^www\./, '')];
+          } catch {
+            return [];
+          }
+        })
+        .filter(Boolean),
+    ),
+  );
+
+// Initialize the Gemini client
+const getGeminiClient = () => {
+  const config = getRuntimeConfig();
+  const apiKey = config.geminiApiKey || process.env.GEMINI_API_KEY || process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("No Gemini API key configured. Please update the desktop provider config.");
+  }
+  return new GoogleGenAI({ apiKey });
+};
+
+const stripCodeFences = (value: string): string =>
+  value
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+const extractOpenAIText = (payload: any): string => {
+  if (typeof payload?.output_text === 'string' && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+
+  const chunks: string[] = [];
+  const output = Array.isArray(payload?.output) ? payload.output : [];
+
+  output.forEach((item: any) => {
+    if (typeof item?.text === 'string' && item.text.trim()) {
+      chunks.push(item.text.trim());
+    }
+    const content = Array.isArray(item?.content) ? item.content : [];
+    content.forEach((part: any) => {
+      if (typeof part?.text === 'string' && part.text.trim()) {
+        chunks.push(part.text.trim());
+      }
+      if (typeof part?.output_text === 'string' && part.output_text.trim()) {
+        chunks.push(part.output_text.trim());
+      }
+    });
+  });
+
+  return chunks.join('\n').trim();
+};
+
+const runOpenAITextPrompt = async (prompt: string, options?: { systemInstruction?: string; model?: string }): Promise<string> => {
+  const config = getRuntimeConfig();
+  const apiKey = config.openaiApiKey;
+  if (!apiKey) {
+    throw new Error('No OpenAI API key configured.');
+  }
+
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: options?.model || config.openaiModel || 'gpt-5',
+      input: [
+        ...(options?.systemInstruction
+          ? [{ role: 'system', content: [{ type: 'input_text', text: options.systemInstruction }] }]
+          : []),
+        { role: 'user', content: [{ type: 'input_text', text: prompt }] },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI request failed (${response.status}): ${errorText}`);
+  }
+
+  const payload = await response.json();
+  const text = extractOpenAIText(payload);
+  if (!text) {
+    throw new Error('OpenAI returned an empty response.');
+  }
+  return text;
+};
+
+const runOpenAIWebSearchPrompt = async (
+  prompt: string,
+  options?: {
+    model?: string;
+    systemInstruction?: string;
+    jsonSchema?: Record<string, unknown>;
+    schemaName?: string;
+    allowedDomains?: string[];
+  },
+): Promise<string> => {
+  const config = getRuntimeConfig();
+  const apiKey = config.openaiApiKey;
+  if (!apiKey) {
+    throw new Error('No OpenAI API key configured.');
+  }
+
+  const payload: Record<string, unknown> = {
+    model: options?.model || config.openaiModel || DEFAULT_OPENAI_WEB_MODEL,
+    reasoning: { effort: 'low' },
+    tool_choice: 'auto',
+    tools: [
+      {
+        type: 'web_search',
+        ...(options?.allowedDomains && options.allowedDomains.length > 0
+          ? {
+              filters: {
+                allowed_domains: options.allowedDomains,
+              },
+            }
+          : {}),
+      },
+    ],
+    input: [
+      ...(options?.systemInstruction
+        ? [{ role: 'system', content: [{ type: 'input_text', text: options.systemInstruction }] }]
+        : []),
+      { role: 'user', content: [{ type: 'input_text', text: prompt }] },
+    ],
+  };
+
+  if (options?.jsonSchema) {
+    payload.text = {
+      format: {
+        type: 'json_schema',
+        name: options.schemaName || 'web_search_result',
+        strict: true,
+        schema: options.jsonSchema,
+      },
+    };
+  }
+
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI request failed (${response.status}): ${errorText}`);
+  }
+
+  const result = await response.json();
+  const text = extractOpenAIText(result);
+  if (!text) {
+    throw new Error('OpenAI web search returned an empty response.');
+  }
+  return text;
+};
+
+const runGeminiTextPrompt = async (
+  prompt: string,
+  options?: { model?: string; systemInstruction?: string; responseMimeType?: 'application/json' | 'text/plain' },
+): Promise<string> => {
+  const ai = getGeminiClient();
+  const response = await ai.models.generateContent({
+    model: options?.model || getConfiguredGeminiModel(MODEL_FAST),
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    config: {
+      ...(options?.systemInstruction ? { systemInstruction: options.systemInstruction } : {}),
+      ...(options?.responseMimeType ? { responseMimeType: options.responseMimeType } : {}),
+    },
+  });
+
+  return response.text || '';
+};
+
+const runPreferredTextPrompt = async (
+  prompt: string,
+  options?: {
+    openaiModel?: string;
+    geminiModel?: string;
+    systemInstruction?: string;
+    responseMimeType?: 'application/json' | 'text/plain';
+    preferred?: Provider;
+    fallback?: Provider;
+    geminiOnly?: boolean;
+  },
+): Promise<string> => {
+  if (options?.geminiOnly) {
+    return runGeminiTextPrompt(prompt, {
+      model: options.geminiModel,
+      systemInstruction: options.systemInstruction,
+      responseMimeType: options.responseMimeType,
+    });
+  }
+
+  const providers = getProviderOrder(options?.preferred, options?.fallback);
+  let lastError: unknown;
+
+  for (const provider of providers) {
+    if (!isProviderConfigured(provider)) {
+      continue;
+    }
+
+    try {
+      if (provider === 'openai') {
+        return await runOpenAITextPrompt(prompt, {
+          model: options?.openaiModel,
+          systemInstruction: options?.systemInstruction,
+        });
+      }
+
+      return await runGeminiTextPrompt(prompt, {
+        model: options?.geminiModel,
+        systemInstruction: options?.systemInstruction,
+        responseMimeType: options?.responseMimeType,
+      });
+    } catch (error) {
+      console.warn(`Provider ${provider} failed, trying fallback if available.`, error);
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('No AI provider is configured.');
+};
+
+const getClient = getGeminiClient;
+
+const MODEL_FACULTY_MATCHER = DEFAULT_GEMINI_MODEL;
+const MODEL_IMAGE_GEN = 'gemini-3-pro-image-preview';
+const MODEL_CHAT = DEFAULT_GEMINI_MODEL;
+const MODEL_FAST = 'gemini-flash-lite-latest'; // Use Flash Lite for fast text parsing
+
+const SUPPORTED_BINARY_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
+function parseDataUrl(fileData: string): { mimeType?: string; base64Data?: string } {
+  const match = fileData.match(/^data:([^;]+);base64,(.+)$/s);
+  if (!match) {
+    return {};
+  }
+
+  return {
+    mimeType: match[1],
+    base64Data: match[2],
+  };
+}
+
+function decodeBase64Utf8(base64Data: string): string {
+  const binary = atob(base64Data);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+}
+
+function normalizeClientFileMimeType(fileData: string, mimeType?: string): string {
+  const parsed = parseDataUrl(fileData);
+  return mimeType || parsed.mimeType || 'text/plain';
+}
+
+function extractTextContent(fileData: string): string {
+  const parsed = parseDataUrl(fileData);
+  if (!parsed.base64Data) {
+    return fileData;
+  }
+
+  return decodeBase64Utf8(parsed.base64Data);
+}
 
 interface MatchParams {
   studentProfile: string;
@@ -37,8 +391,6 @@ interface ParsedRequirements {
 }
 
 export const parseRequirementText = async (rawText: string): Promise<ParsedRequirements> => {
-  const ai = getClient();
-  
   const prompt = `
     Task: Extract structured academic application data from the provided raw text.
     
@@ -93,16 +445,11 @@ export const parseRequirementText = async (rawText: string): Promise<ParsedRequi
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: MODEL_FAST,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: schema,
-      }
+    const jsonText = await runPreferredTextPrompt(prompt, {
+      openaiModel: 'gpt-5',
+      geminiModel: MODEL_FAST,
+      responseMimeType: 'application/json',
     });
-
-    const jsonText = response.text || "{}";
     const result = JSON.parse(jsonText) as ParsedRequirements;
     
     // Ensure targets is never null/undefined
@@ -154,8 +501,6 @@ export const decomposeResearchField = async (
   department: string, 
   studentProfile?: string
 ): Promise<FieldDecomposition> => {
-  const ai = getClient();
-  
   const prompt = `
     Task: Analyze whether this research direction is a "niche/rare interdisciplinary field" that is unlikely to have a single professor perfectly matching it.
     
@@ -210,12 +555,12 @@ export const decomposeResearchField = async (
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: MODEL_FAST,
-      contents: prompt,
-      config: { responseMimeType: "application/json", responseSchema: schema }
+    const jsonText = await runPreferredTextPrompt(prompt, {
+      openaiModel: 'gpt-5',
+      geminiModel: MODEL_FAST,
+      responseMimeType: 'application/json',
     });
-    return JSON.parse(response.text || '{}') as FieldDecomposition;
+    return JSON.parse(stripCodeFences(jsonText || '{}')) as FieldDecomposition;
   } catch {
     return {
       isNiche: false,
@@ -284,8 +629,7 @@ export const generateFacultyMatchesDecomposed = async (
         // 同一人在多个维度出现——加分！说明是交叉型学者
         const existing = seen.get(key)!;
         existing.dimensionTags.push(dr.dimension);
-        const currentScore = existing.matchScore ?? 0;
-        existing.matchScore = Math.min(100, currentScore + 10); // 每多覆盖一个维度加10分
+        existing.matchScore = Math.min(100, existing.matchScore + 10); // 每多覆盖一个维度加10分
       } else {
         seen.set(key, { 
           ...prof, 
@@ -303,9 +647,7 @@ export const generateFacultyMatchesDecomposed = async (
       if (b.dimensionTags.length !== a.dimensionTags.length) {
         return b.dimensionTags.length - a.dimensionTags.length; // 覆盖维度多的排前面
       }
-      const scoreA = a.matchScore ?? 0;
-      const scoreB = b.matchScore ?? 0;
-      return scoreB - scoreA;
+      return b.matchScore - a.matchScore;
     });
 
   return {
@@ -317,7 +659,6 @@ export const generateFacultyMatchesDecomposed = async (
 };
 
 export const generateFacultyMatches = async (params: MatchParams): Promise<FacultyMember[]> => {
-  const ai = getClient();
   const { 
     studentProfile, 
     directoryUrl, 
@@ -433,13 +774,9 @@ ${isInterdisciplinary ? `
 
     **OUTPUT RULES**:
     - **QS Ranking**: Include current QS World Ranking (e.g., "QS 2025: #15").
-    - **University Names**: Provide both Chinese and English names.
-    - **Program Info**: Provide both Chinese and English program names.
-    - **Admission Data**: For deadlines, requirements, RP word count, tuition, and scholarships, you MUST provide the value AND the source URL where you found it.
     - **Email**: Must be the official academic email.
     - **Research Areas**: Format as "English Term (中文翻译)".
     - **Match Reasoning**: Chinese, concise, verified.
-    - **Recommendation Reason**: Provide a 1-2 sentence recommendation reason in Chinese.
     - **Language**: Simplified Chinese.
 
     **RECENT ACADEMIC ACTIVITIES (${currentYear - 5}-${currentYear}) - DETAILED PAPERS & PROJECTS**:
@@ -476,11 +813,7 @@ ${isInterdisciplinary ? `
       properties: {
         name: { type: Type.STRING },
         title: { type: Type.STRING },
-        university: { type: Type.STRING, description: "Full Name of University (CN)" },
-        universityEn: { type: Type.STRING, description: "Full Name of University (EN)" },
-        department: { type: Type.STRING, description: "Department Name" },
-        programName: { type: Type.STRING, description: "Program Name (CN)" },
-        programNameEn: { type: Type.STRING, description: "Program Name (EN)" },
+        university: { type: Type.STRING, description: "Full Name of University (EN & CN)" },
         matchScore: { type: Type.INTEGER },
         researchAreas: { type: Type.ARRAY, items: { type: Type.STRING, description: "Research areas: English (Chinese)" } },
         alignmentDetails: { type: Type.STRING },
@@ -491,33 +824,6 @@ ${isInterdisciplinary ? `
         photoUrl: { type: Type.STRING, description: "URL to the professor's profile photo" },
         email: { type: Type.STRING },
         qsRanking: { type: Type.STRING },
-        qsRankingData: {
-          type: Type.OBJECT,
-          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
-        },
-        deadlineData: {
-          type: Type.OBJECT,
-          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
-        },
-        applicationReqsData: {
-          type: Type.OBJECT,
-          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
-        },
-        rpReqsData: {
-          type: Type.OBJECT,
-          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
-        },
-        tuitionData: {
-          type: Type.OBJECT,
-          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
-        },
-        scholarshipData: {
-          type: Type.OBJECT,
-          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
-        },
-        programUrl: { type: Type.STRING },
-        universityUrl: { type: Type.STRING },
-        recommendationReason: { type: Type.STRING },
         matchReasoning: {
           type: Type.OBJECT,
           properties: {
@@ -541,9 +847,114 @@ ${isInterdisciplinary ? `
     }
   };
 
+  const openAIResponseSchema = {
+    type: 'array',
+    items: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        name: { type: 'string' },
+        title: { type: 'string' },
+        university: { type: 'string' },
+        matchScore: { type: 'integer' },
+        researchAreas: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        alignmentDetails: { type: 'string' },
+        activitySummary: { type: 'string' },
+        recentActivities: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        isActive: { type: 'boolean' },
+        profileUrl: { type: 'string' },
+        photoUrl: { type: 'string' },
+        email: { type: 'string' },
+        qsRanking: { type: 'string' },
+        matchReasoning: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            locationCheck: { type: 'string' },
+            universityCheck: { type: 'string' },
+            departmentCheck: { type: 'string' },
+            researchFit: { type: 'string' },
+            positionCheck: { type: 'string' },
+            activityCheck: { type: 'string' },
+            reputationCheck: { type: 'string' },
+          },
+          required: [
+            'locationCheck',
+            'universityCheck',
+            'departmentCheck',
+            'researchFit',
+            'positionCheck',
+            'activityCheck',
+            'reputationCheck',
+          ],
+        },
+      },
+      required: [
+        'name',
+        'title',
+        'university',
+        'matchScore',
+        'researchAreas',
+        'alignmentDetails',
+        'activitySummary',
+        'recentActivities',
+        'isActive',
+        'profileUrl',
+        'photoUrl',
+        'email',
+        'qsRanking',
+        'matchReasoning',
+      ],
+    },
+  } as const;
+
+  const sanitizeFacultyResults = (rawResults: FacultyMember[]) =>
+    rawResults.map((prof) => ({
+      ...prof,
+      profileUrl: (() => {
+        if (!prof.profileUrl) return '';
+        try {
+          const u = new URL(prof.profileUrl);
+          if (!['http:', 'https:'].includes(u.protocol)) return '';
+          if (u.pathname === '/' || u.pathname === '') return '';
+          return prof.profileUrl;
+        } catch {
+          return '';
+        }
+      })(),
+      email: prof.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(prof.email) ? prof.email : '',
+      photoUrl: prof.photoUrl && prof.photoUrl.startsWith('http') ? prof.photoUrl : '',
+    }));
+
+  const allowedDomains = extractAllowedDomains(directoryUrl);
+  let openAIWebSearchError: unknown = null;
+
+  if (isProviderConfigured('openai')) {
+    try {
+      const jsonText = await runOpenAIWebSearchPrompt(promptContent, {
+        model: getRuntimeConfig().openaiModel || DEFAULT_OPENAI_WEB_MODEL,
+        jsonSchema: openAIResponseSchema,
+        schemaName: 'faculty_matches',
+        allowedDomains,
+      });
+      return sanitizeFacultyResults(JSON.parse(stripCodeFences(jsonText || '[]')) as FacultyMember[]);
+    } catch (error) {
+      openAIWebSearchError = error;
+      console.warn('OpenAI web search failed, falling back to Gemini.', error);
+    }
+  }
+
+  const ai = getGeminiClient();
+
   try {
-    const response = await ai.models.generateContent({
-      model: MODEL_FACULTY_MATCHER,
+      const response = await ai.models.generateContent({
+        model: getGeminiSearchModel() || MODEL_FACULTY_MATCHER,
       contents: promptContent,
       config: {
         responseMimeType: "application/json",
@@ -574,6 +985,9 @@ ${isInterdisciplinary ? `
     }));
   } catch (error) {
     console.error("Faculty matching failed:", error);
+    if (openAIWebSearchError) {
+      throw new Error(`All web search providers failed: ${describeWebSearchError(openAIWebSearchError)}；${describeGeminiError(error)}`);
+    }
     throw error;
   }
 };
@@ -607,27 +1021,62 @@ export const generateImage = async (prompt: string, size: ImageSize): Promise<st
   throw new Error("Failed to generate image or no image returned.");
 };
 
-export const createChatSession = (): Chat => {
-  const ai = getClient();
-  return ai.chats.create({
+export const createChatSession = (): ChatSession => {
+  const config = getRuntimeConfig();
+  const systemInstruction = "You are a helpful academic assistant.";
+  const providerOrder = getProviderOrder();
+
+  if (providerOrder[0] === 'openai' && isProviderConfigured('openai')) {
+    const history: Array<{ role: 'user' | 'assistant'; text: string }> = [];
+    return {
+      sendMessage: async ({ message }) => {
+        const prompt = [
+          ...history.map((item) => `${item.role === 'user' ? 'User' : 'Assistant'}: ${item.text}`),
+          `User: ${message}`,
+          'Assistant:',
+        ].join('\n\n');
+
+        try {
+          const text = await runPreferredTextPrompt(prompt, {
+            openaiModel: config.openaiModel || MODEL_CHAT,
+            geminiModel: MODEL_CHAT,
+            systemInstruction,
+          });
+          history.push({ role: 'user', text: message });
+          history.push({ role: 'assistant', text });
+          return { text };
+        } catch (error) {
+          console.error('Chat session failed:', error);
+          throw error;
+        }
+      },
+    };
+  }
+
+  const ai = getGeminiClient();
+  const chat = ai.chats.create({
     model: MODEL_CHAT,
     config: {
-      systemInstruction: "You are a helpful academic assistant."
+      systemInstruction,
     }
   });
+
+  return {
+    sendMessage: async ({ message }) => {
+      const response = await chat.sendMessage({ message });
+      return { text: response.text || '' };
+    },
+  };
 };
 
 export const getFastResponse = async (query: string): Promise<string> => {
-  const ai = getClient();
-  const response = await ai.models.generateContent({
-    model: MODEL_FAST,
-    contents: query,
+  return runPreferredTextPrompt(query, {
+    openaiModel: 'gpt-5',
+    geminiModel: MODEL_FAST,
   });
-  return response.text || "";
 };
 
 export const reduceAIDetection = async (content: string, mode: 'standard' | 'deep' = 'standard'): Promise<string> => {
-  const ai = getClient();
   const prompt = `
     Task: Rewrite the following academic essay to reduce AI detection while preserving meaning, tone, and academic quality.
     
@@ -649,12 +1098,15 @@ export const reduceAIDetection = async (content: string, mode: 'standard' | 'dee
     Return ONLY the rewritten text. Do not include any explanation or metadata.
   `;
   
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: prompt,
-  });
-  
-  return response.text || content;
+  try {
+    return await runPreferredTextPrompt(prompt, {
+      openaiModel: 'gpt-5',
+      geminiModel: 'gemini-2.5-flash',
+    });
+  } catch (error) {
+    console.error("Error reducing AI detection:", error);
+    return content;
+  }
 };
 
 export async function generatePSOutline(params: {
@@ -666,7 +1118,6 @@ export async function generatePSOutline(params: {
   instructions?: string;
   studentProfile?: Client;
 }): Promise<string[]> {
-  const ai = getClient();
   const { studentName, targetUni, degree, major, outlineCount, instructions, studentProfile } = params;
 
   const profileContext = studentProfile ? `
@@ -702,15 +1153,13 @@ export async function generatePSOutline(params: {
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: { responseMimeType: 'application/json' }
+    const text = await runPreferredTextPrompt(prompt, {
+      openaiModel: 'gpt-5',
+      geminiModel: 'gemini-2.5-flash',
+      responseMimeType: 'application/json',
     });
-    
-    const text = response.text;
     if (!text) return [];
-    return JSON.parse(text);
+    return JSON.parse(stripCodeFences(text));
   } catch (error) {
     console.error("Error generating PS outline:", error);
     return Array(outlineCount).fill("Failed to generate outline paragraph.");
@@ -726,7 +1175,6 @@ export async function generatePSContent(params: {
   instructions?: string;
   studentProfile?: Client;
 }): Promise<string> {
-  const ai = getClient();
   const { studentName, targetUni, degree, major, outlines, instructions, studentProfile } = params;
 
   const profileContext = studentProfile ? `
@@ -758,11 +1206,10 @@ export async function generatePSContent(params: {
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }]
+    return await runPreferredTextPrompt(prompt, {
+      openaiModel: 'gpt-5',
+      geminiModel: 'gemini-2.5-flash',
     });
-    return response.text || '';
   } catch (error) {
     console.error("Error generating PS content:", error);
     return "Failed to generate content.";
@@ -777,7 +1224,6 @@ export async function generateEssay(params: {
   targetUni?: string;
   focusPoints?: string;
 }): Promise<string> {
-  const ai = getClient();
   const { studentName, promptText, wordCount, studentProfile, targetUni, focusPoints } = params;
 
   const profileContext = studentProfile ? `
@@ -809,11 +1255,10 @@ export async function generateEssay(params: {
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }]
+    return await runPreferredTextPrompt(prompt, {
+      openaiModel: 'gpt-5',
+      geminiModel: 'gemini-2.5-flash',
     });
-    return response.text || '';
   } catch (error) {
     console.error("Error generating essay:", error);
     return "Failed to generate essay.";
@@ -830,7 +1275,6 @@ export async function generateLOR(params: {
   major?: string;
   focusPoints?: string;
 }): Promise<string> {
-  const ai = getClient();
   const { studentName, recommenderName, recommenderTitle, relationship, studentProfile, targetUni, major, focusPoints } = params;
 
   const profileContext = studentProfile ? `
@@ -863,11 +1307,10 @@ export async function generateLOR(params: {
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }]
+    return await runPreferredTextPrompt(prompt, {
+      openaiModel: 'gpt-5',
+      geminiModel: 'gemini-2.5-flash',
     });
-    return response.text || '';
   } catch (error) {
     console.error("Error generating LOR:", error);
     return "Failed to generate LOR.";
@@ -879,7 +1322,6 @@ export async function generateCV(params: {
   studentProfile?: Client;
   instructions?: string;
 }): Promise<string> {
-  const ai = getClient();
   const { studentName, studentProfile, instructions } = params;
 
   const profileContext = studentProfile ? JSON.stringify(studentProfile, null, 2) : '';
@@ -902,11 +1344,10 @@ export async function generateCV(params: {
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }]
+    return await runPreferredTextPrompt(prompt, {
+      openaiModel: 'gpt-5',
+      geminiModel: 'gemini-2.5-flash',
     });
-    return response.text || '';
   } catch (error) {
     console.error("Error generating CV:", error);
     return "Failed to generate CV.";
@@ -914,7 +1355,6 @@ export async function generateCV(params: {
 }
 
 export async function parseResumeContent(fileContent: string): Promise<Partial<Client>> {
-  const ai = getClient();
   const prompt = `
     You are a professional resume parser. Extract structured information from the following resume/CV text.
     
@@ -937,15 +1377,13 @@ export async function parseResumeContent(fileContent: string): Promise<Partial<C
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: { responseMimeType: 'application/json' }
+    const text = await runPreferredTextPrompt(prompt, {
+      openaiModel: 'gpt-5',
+      geminiModel: 'gemini-3-flash-preview',
+      responseMimeType: 'application/json',
     });
-    
-    const text = response.text;
     if (!text) return {};
-    return JSON.parse(text);
+    return JSON.parse(stripCodeFences(text));
   } catch (error) {
     console.error("Error parsing resume:", error);
     return {};
@@ -985,22 +1423,16 @@ export const generateProfileAnalysis = async (client: Client): Promise<string> =
 
 export const parseClientFile = async (fileData: string, mimeType: string = 'text/plain'): Promise<Partial<Client>> => {
   const ai = getClient();
+  const normalizedMimeType = normalizeClientFileMimeType(fileData, mimeType);
   
   let contents: any;
 
-  if (mimeType.startsWith('text/')) {
-    // For text files, we can just embed the text
-    // Note: fileData might be base64 encoded if it came from FileReader as data URL
-    // If it is a data URL, we need to strip the prefix and decode it, OR just use the inlineData if the model supports it.
-    // However, for text, it's safer to decode if it's base64.
-    
+  if (normalizedMimeType.startsWith('text/')) {
     let textContent = fileData;
-    if (fileData.includes('base64,')) {
-        try {
-            textContent = atob(fileData.split('base64,')[1]);
-        } catch (e) {
-            console.warn("Failed to decode base64 text, using raw data", e);
-        }
+    try {
+      textContent = extractTextContent(fileData);
+    } catch (error) {
+      console.warn('Failed to decode text file with UTF-8, using raw data.', error);
     }
 
     const prompt = `
@@ -1059,15 +1491,18 @@ export const parseClientFile = async (fileData: string, mimeType: string = 'text
     contents = prompt;
 
   } else {
-    // For PDF, Images, etc., use inlineData
-    // fileData should be the base64 string (without the data:mime/type;base64, prefix if possible, or we strip it)
-    const base64Data = fileData.includes('base64,') ? fileData.split('base64,')[1] : fileData;
+    const parsed = parseDataUrl(fileData);
+    const base64Data = parsed.base64Data || fileData;
+
+    if (!normalizedMimeType.startsWith('image/') && !SUPPORTED_BINARY_MIME_TYPES.has(normalizedMimeType)) {
+      throw new Error(`Unsupported file type for parsing: ${normalizedMimeType}`);
+    }
 
     contents = {
       parts: [
         {
           inlineData: {
-            mimeType: mimeType,
+            mimeType: normalizedMimeType,
             data: base64Data
           }
         },
@@ -1188,7 +1623,7 @@ export const searchFacultyByWeb = async (query: string): Promise<FacultyMember[]
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: getGeminiSearchModel(),
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
@@ -1234,7 +1669,7 @@ export const searchUniversityInfo = async (university: string, department?: stri
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: getGeminiSearchModel(),
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
@@ -1247,186 +1682,6 @@ export const searchUniversityInfo = async (university: string, department?: stri
     return JSON.parse(text);
   } catch (error) {
     console.error("University search failed:", error);
-    return null;
-  }
-};
-
-export const processImportedFacultyBatch = async (rows: any[]): Promise<{ faculty: FacultyMember, country: string, fieldCategory: string }[]> => {
-  const ai = getClient();
-  
-  // Clean rows to avoid sending excessively large data
-  const cleanedRows = rows.map(row => {
-    const cleaned: any = {};
-    for (const key in row) {
-      const val = row[key];
-      if (typeof val === 'string') {
-        // Truncate very long strings to keep prompt size reasonable
-        cleaned[key] = val.length > 1000 ? val.substring(0, 1000) + "..." : val;
-      } else {
-        cleaned[key] = val;
-      }
-    }
-    return cleaned;
-  });
-
-  const prompt = `
-    Task: You are an expert academic data processor. You have received a batch of raw data rows from an Excel/CSV file representing faculty members.
-    Your job is to extract, clean, and structure this data into a list of valid FacultyMember objects, along with their Country and Field Category.
-    
-    Batch Data (JSON Array):
-    ${JSON.stringify(cleanedRows)}
-    
-    Instructions:
-    1. For each row, extract the professor's Name, University (Chinese and English), and Title.
-    2. Extract Program Name (Chinese and English), QS Ranking, Application Deadline, Program URL, University URL, Tuition, and Scholarship Info.
-    3. Extract Application Requirements, RP (Research Proposal) Requirements, Research Areas/Papers, and Recommendation Reason.
-    4. Extract Department, Email, and Profile URL.
-    5. Determine the Country/Region of the University (e.g., "美国", "英国", "中国", "澳洲", "加拿大", "新加坡", etc.).
-    6. Determine the broad Field Category (e.g., "计算机科学", "机械工程", "商科与经济", "生物与医学", etc.) based on their research or department.
-    7. If a row is missing Name or University, try to infer them from context if possible, otherwise skip.
-    8. All missing information can be left as empty strings or nulls; do not hallucinate.
-    9. Return an array of objects matching the schema below.
-    
-    Output Schema (JSON Array of Objects):
-    [{
-      "faculty": {
-        "name": "String",
-        "title": "String",
-        "university": "String",
-        "universityEn": "String",
-        "department": "String",
-        "programName": "String",
-        "programNameEn": "String",
-        "matchScore": 0,
-        "researchAreas": ["Area 1", "Area 2"],
-        "alignmentDetails": "String",
-        "activitySummary": "",
-        "recentActivities": [],
-        "isActive": true,
-        "profileUrl": "String",
-        "photoUrl": "String",
-        "email": "String",
-        "qsRanking": "String",
-        "qsRankingData": { "value": "String", "sourceUrl": "" },
-        "deadlineData": { "value": "String", "sourceUrl": "" },
-        "applicationReqsData": { "value": "String", "sourceUrl": "" },
-        "rpReqsData": { "value": "String", "sourceUrl": "" },
-        "tuitionData": { "value": "String", "sourceUrl": "" },
-        "scholarshipData": { "value": "String", "sourceUrl": "" },
-        "programUrl": "String",
-        "universityUrl": "String",
-        "recommendationReason": "String",
-        "matchReasoning": {
-          "locationCheck": "",
-          "universityCheck": "",
-          "departmentCheck": "",
-          "researchFit": "",
-          "positionCheck": "",
-          "activityCheck": "",
-          "reputationCheck": ""
-        }
-      },
-      "country": "String",
-      "fieldCategory": "String"
-    }]
-  `;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: MODEL_FAST,
-      contents: prompt,
-      config: { responseMimeType: "application/json" }
-    });
-    
-    const text = response.text;
-    if (!text) return [];
-    
-    const result = JSON.parse(text);
-    if (!Array.isArray(result)) return [];
-    
-    return result.filter(item => item.faculty && item.faculty.name && item.faculty.university);
-  } catch (error) {
-    console.error("Failed to process imported batch:", error);
-    throw error; // Rethrow to trigger fallback in UI
-  }
-};
-
-export const processImportedFacultyRow = async (rawRow: any): Promise<{ faculty: FacultyMember, country: string, fieldCategory: string } | null> => {
-  const ai = getClient();
-  const prompt = `
-    Task: You are an expert academic data processor. You have received a raw row of data from an Excel/CSV file representing a faculty member.
-    Your job is to extract, clean, and structure this data into a valid FacultyMember object, along with their Country and Field Category.
-    
-    Raw Row Data (JSON):
-    ${JSON.stringify(rawRow)}
-    
-    Instructions:
-    1. Extract the professor's Name, University, and Title. These are REQUIRED. If Name or University is completely missing and cannot be inferred, return null (by returning an empty object or throwing, but preferably just do your best to extract).
-    2. Extract Department, Research Areas (as an array of strings), Email, Profile URL.
-    3. Determine the Country/Region of the University (e.g., "美国", "英国", "中国", "澳洲", "加拿大", "新加坡", etc.).
-    4. Determine the broad Field Category (e.g., "计算机科学", "机械工程", "商科与经济", "生物与医学", etc.) based on their research or department.
-    5. Ensure all fields match the required schema.
-    
-    Output Schema (JSON):
-    {
-      "faculty": {
-        "name": "String",
-        "title": "String",
-        "university": "String",
-        "universityEn": "String",
-        "department": "String",
-        "programName": "String",
-        "programNameEn": "String",
-        "matchScore": 0,
-        "researchAreas": ["Area 1", "Area 2"],
-        "alignmentDetails": "String (Summary of their work)",
-        "activitySummary": "String",
-        "recentActivities": ["Activity 1", "Activity 2"],
-        "isActive": true,
-        "profileUrl": "String",
-        "photoUrl": "String",
-        "email": "String",
-        "qsRanking": "String",
-        "qsRankingData": { "value": "String", "sourceUrl": "String" },
-        "deadlineData": { "value": "String", "sourceUrl": "String" },
-        "applicationReqsData": { "value": "String", "sourceUrl": "String" },
-        "rpReqsData": { "value": "String", "sourceUrl": "String" },
-        "tuitionData": { "value": "String", "sourceUrl": "String" },
-        "scholarshipData": { "value": "String", "sourceUrl": "String" },
-        "programUrl": "String",
-        "universityUrl": "String",
-        "recommendationReason": "String",
-        "matchReasoning": {
-          "locationCheck": "",
-          "universityCheck": "",
-          "departmentCheck": "",
-          "researchFit": "",
-          "positionCheck": "",
-          "activityCheck": "",
-          "reputationCheck": ""
-        }
-      },
-      "country": "String (e.g., 美国)",
-      "fieldCategory": "String (e.g., 计算机科学)"
-    }
-  `;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: MODEL_FAST,
-      contents: prompt,
-      config: { responseMimeType: "application/json" }
-    });
-    
-    const text = response.text;
-    if (!text) return null;
-    
-    const result = JSON.parse(text);
-    if (!result.faculty || !result.faculty.name || !result.faculty.university) return null;
-    
-    return result;
-  } catch (error) {
-    console.error("Failed to process imported row:", error);
     return null;
   }
 };
@@ -1453,7 +1708,7 @@ export const refreshFacultyData = async (existing: FacultyMember): Promise<Facul
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: getGeminiSearchModel(),
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         responseMimeType: 'application/json',

@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage } from '../types';
-import { createChatSession } from '../services/geminiService';
-import { Chat } from '@google/genai';
+import { createChatSession, ChatSession } from '../services/geminiService';
 
 const ChatBot: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const chatSession = useRef<Chat | null>(null);
+  const chatSession = useRef<ChatSession | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
