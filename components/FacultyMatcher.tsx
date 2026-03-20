@@ -5,6 +5,7 @@ import {
   buildEvaluationForClient,
   getLocalFacultyMatches,
   mergeLocalAndWebMatches,
+  normalizeFacultyIdentity,
 } from '../services/facultyMatching';
 import {
   buildClientProfileSummary,
@@ -40,6 +41,14 @@ interface FacultyMatcherProps {
   selectedClient?: Client | null;
   facultyDatabase?: FacultyRecord[];
   onAddFacultyToDatabase?: (faculty: FacultyMember, country: string, fieldCategory: string) => string;
+  onSyncWebResultsToDatabase?: (
+    faculty: FacultyMember[],
+    defaults?: { country?: string; fieldCategory?: string },
+  ) => {
+    createdFacultyCount: number;
+    mergedFacultyCount: number;
+    appendedProjectCount: number;
+  };
   onLinkFacultyToClient?: (facultyId: string, clientId: string, options?: LinkOptions) => void;
   onUpdateClient?: (client: Client) => void;
   onAddClient?: (name: string, parsedData: Partial<Client>) => void;
@@ -84,6 +93,11 @@ function createDefaultFilters(): MatcherSearchFilters {
     rpTopic: '',
     avoidPreviousMentors: '',
   };
+}
+
+function getRequestedMatchCount(filters: MatcherSearchFilters): number {
+  const requested = filters.targets.reduce((sum, target) => sum + (target.count || 0), 0);
+  return Math.max(requested || filters.selectionCount || 5, 1);
 }
 
 const Section = ({ title, step, children }: { title: string; step: string; children: React.ReactNode }) => (
@@ -180,6 +194,7 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
   selectedClient = null,
   facultyDatabase = [],
   onAddFacultyToDatabase,
+  onSyncWebResultsToDatabase,
   onLinkFacultyToClient,
   onUpdateClient,
 }) => {
@@ -195,6 +210,14 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
   const activeClient = useMemo(
     () => clients.find((item) => item.id === selectedClientId) || selectedClient || null,
     [clients, selectedClient, selectedClientId],
+  );
+
+  const facultyIdByIdentity = useMemo(
+    () =>
+      new Map(
+        facultyDatabase.map((faculty) => [normalizeFacultyIdentity(faculty.name, faculty.university), faculty.id]),
+      ),
+    [facultyDatabase],
   );
 
   useEffect(() => {
@@ -309,12 +332,16 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
 
     setLoading(true);
     try {
-      const nextLocal = filters.sourceModes.includes('local') ? getLocalFacultyMatches(facultyDatabase, filters) : [];
+      const totalCountNeeded = getRequestedMatchCount(filters);
+      const nextLocalAll = filters.sourceModes.includes('local') ? getLocalFacultyMatches(facultyDatabase, filters) : [];
+      const nextLocal = nextLocalAll.slice(0, totalCountNeeded);
       let mergedLocal = nextLocal;
       let mergedWeb: FacultyMember[] = [];
       let toastMessage = '';
+      let syncMessage = '';
+      const remainingCount = Math.max(totalCountNeeded - nextLocal.length, 0);
 
-      if (filters.sourceModes.includes('web')) {
+      if (filters.sourceModes.includes('web') && remainingCount > 0) {
         if (!isAnyWebSearchProviderConfigured()) {
           toastMessage = filters.sourceModes.includes('local')
             ? `本地匹配已返回 ${nextLocal.length} 位导师；联网导师检索需要至少配置 OpenAI 或 Gemini 其中之一。`
@@ -332,11 +359,15 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
             const result = await generateFacultyMatchesDecomposed({
               studentProfile: filters.profileSummary || buildClientProfileSummary(activeClient || {}),
               directoryUrl: filters.officialLinks[0],
-              targets: filters.targets.map((item) => ({
-                region: item.country || '',
-                university: item.university || '',
-                count: item.count || filters.selectionCount || 5,
-              })),
+              targets: filters.targets.map((item) => {
+                const baseCount = item.count || filters.selectionCount || 5;
+                const scaledCount = Math.ceil(baseCount * (remainingCount / totalCountNeeded));
+                return {
+                  region: item.country || '',
+                  university: item.university || '',
+                  count: Math.max(1, scaledCount),
+                };
+              }),
               department: departmentQuery,
               manualContent: buildManualContent(),
               targetPosition: filters.targetPosition,
@@ -349,6 +380,20 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
             const merged = mergeLocalAndWebMatches(nextLocal, result.allFaculty || [], filters);
             mergedLocal = merged.local;
             mergedWeb = merged.web;
+
+            if (mergedWeb.length > 0 && onSyncWebResultsToDatabase) {
+              const firstTarget = filters.targets.find((item) =>
+                [item.country, item.major, item.department].some(Boolean),
+              );
+              const syncSummary = onSyncWebResultsToDatabase(mergedWeb, {
+                country: firstTarget?.country || '',
+                fieldCategory: firstTarget?.major || firstTarget?.department || filters.majorA || filters.majorB || '未分类',
+              });
+              const syncedCount = syncSummary.createdFacultyCount + syncSummary.mergedFacultyCount;
+              if (syncedCount > 0) {
+                syncMessage = `联网结果已同步到统一导师库（新增 ${syncSummary.createdFacultyCount}，合并 ${syncSummary.mergedFacultyCount}）。`;
+              }
+            }
           } catch (error) {
             console.error('Web faculty match failed:', error);
             toastMessage = filters.sourceModes.includes('local')
@@ -373,7 +418,7 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
             ? `${reasons.join('；')}。请先导入导师总表，或补充更具体的国家、学校、专业条件后再试。`
             : '这次没有检索到可用导师，请补充更具体的筛选条件后重试。';
       }
-      setToast(toastMessage || `检索完成，共返回 ${mergedLocal.length + mergedWeb.length} 位导师。`);
+      setToast(toastMessage || `检索完成，共返回 ${mergedLocal.length + mergedWeb.length} 位导师。${syncMessage}`);
     } catch (error) {
       console.error('Faculty match failed:', error);
       setToast('导师检索失败，请稍后重试。');
@@ -388,7 +433,10 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
       return;
     }
 
-    let facultyId = 'id' in faculty ? faculty.id : '';
+    let facultyId =
+      'id' in faculty
+        ? faculty.id
+        : facultyIdByIdentity.get(normalizeFacultyIdentity(faculty.name, faculty.university)) || '';
     if (!facultyId && onAddFacultyToDatabase) {
       facultyId = onAddFacultyToDatabase(
         faculty,

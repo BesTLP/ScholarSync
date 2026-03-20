@@ -34,7 +34,7 @@ import FacultyManualEntryModal from './FacultyManualEntryModal';
 import FacultySearchModal from './FacultySearchModal';
 import { importFacultyFromXlsx } from '../services/facultyImportService';
 import { buildEvaluationForClient } from '../services/facultyMatching';
-import { refreshFacultyData } from '../services/geminiService';
+import { describeWebSearchError, refreshFacultyData } from '../services/geminiService';
 
 interface FacultyDatabaseProps {
   facultyDatabase: FacultyRecord[];
@@ -605,6 +605,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
       });
     } catch (error) {
       console.error('Refresh failed:', error);
+      window.alert(describeWebSearchError(error));
     } finally {
       setRefreshingId(null);
     }

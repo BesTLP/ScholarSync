@@ -127,8 +127,8 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
                       <td className="px-4 py-3">
                         <input 
                           type="text" 
-                          value={item.faculty.programName || item.faculty.department || ''} 
-                          onChange={(e) => handleUpdate(index, 'programName', e.target.value)}
+                          value={item.faculty.department || ''} 
+                          onChange={(e) => handleUpdate(index, 'department', e.target.value)}
                           className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm text-gray-600"
                         />
                       </td>

@@ -266,6 +266,39 @@ function App() {
     return summary;
   };
 
+  const syncWebResultsToDatabase = (
+    facultyMembers: FacultyMember[],
+    defaults?: { country?: string; fieldCategory?: string },
+  ) => {
+    const summary = {
+      createdFacultyCount: 0,
+      mergedFacultyCount: 0,
+      appendedProjectCount: 0,
+    };
+
+    setFacultyDatabase((prev) => {
+      let next = prev;
+      for (const faculty of facultyMembers) {
+        const incomingRecord = buildFacultyRecordFromMember(faculty, {
+          manualCountry: defaults?.country,
+          manualField: defaults?.fieldCategory,
+          extra: { source: 'search', matchSource: 'web' },
+        });
+        const result = upsertFacultyRecord(next, incomingRecord);
+        next = result.records;
+        if (result.created) {
+          summary.createdFacultyCount += 1;
+        } else if (result.merged) {
+          summary.mergedFacultyCount += 1;
+        }
+        summary.appendedProjectCount += result.appendedProjectCount;
+      }
+      return next;
+    });
+
+    return summary;
+  };
+
   const updateFacultyRecord = (id: string, updates: Partial<FacultyRecord>) => {
     setFacultyDatabase(prev => prev.map(f => {
       if (f.id !== id) {
@@ -594,6 +627,7 @@ function App() {
             selectedClient={selectedClient}
             facultyDatabase={facultyDatabase}
             onAddFacultyToDatabase={addFacultyToDatabase}
+            onSyncWebResultsToDatabase={syncWebResultsToDatabase}
             onLinkFacultyToClient={linkFacultyToClient}
             onUpdateClient={updateClient}
             onAddClient={(name, parsedData) => addClient({ name, ...parsedData })}

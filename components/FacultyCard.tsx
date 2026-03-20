@@ -1,7 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { FacultyMember, FacultyProject, FacultyRecord } from '../types';
 import { useEffect } from 'react';
-import { searchUniversityInfo } from '../services/geminiService';
+import { describeWebSearchError, searchUniversityInfo } from '../services/geminiService';
 import { 
   Award, 
   ExternalLink, 
@@ -75,6 +75,11 @@ function mergeUrls(...values: Array<string[] | string | undefined>): string[] {
     });
   });
   return Array.from(merged);
+}
+
+function hasAdmissionValue(value?: string | null): boolean {
+  const normalized = cleanText(value);
+  return Boolean(normalized && normalized !== '未找到官方数据' && normalized !== 'Not found in official sources');
 }
 
 function parseMetricLine(line: string): Array<{ key: string; value: string }> {
@@ -454,6 +459,8 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
   const [admissionData, setAdmissionData] = useState<any>(null);
   const [loadingAdmission, setLoadingAdmission] = useState(false);
   const [admissionLoaded, setAdmissionLoaded] = useState(false);
+  const [admissionStatusMessage, setAdmissionStatusMessage] = useState<string | null>(null);
+  const [admissionStatusTone, setAdmissionStatusTone] = useState<'error' | 'info' | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const identityKey = prof && typeof prof === 'object' && 'id' in prof && prof.id
     ? prof.id
@@ -464,15 +471,28 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
     setAdmissionData(null);
     setLoadingAdmission(false);
     setAdmissionLoaded(false);
+    setAdmissionStatusMessage(null);
+    setAdmissionStatusTone(null);
     setIsExpanded(false);
   }, [identityKey]);
 
   const handleLoadAdmission = async () => {
     setLoadingAdmission(true);
+    setAdmissionStatusMessage(null);
+    setAdmissionStatusTone(null);
     try {
       const data = await searchUniversityInfo(prof.university, prof.department);
       setAdmissionData(data);
-    } catch { /* ignore */ } 
+      if (!data) {
+        setAdmissionStatusTone('info');
+        setAdmissionStatusMessage('本次联网检索已完成，但暂未查询到可用的招生数据。');
+      }
+    } catch (error) {
+      console.error('University search failed:', error);
+      setAdmissionData(null);
+      setAdmissionStatusTone('error');
+      setAdmissionStatusMessage(describeWebSearchError(error));
+    }
     finally {
       setLoadingAdmission(false);
       setAdmissionLoaded(true);
@@ -796,34 +816,34 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
             </button>
           ) : admissionData ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {admissionData.qsRanking && admissionData.qsRanking !== '未找到官方数据' && (
+              {hasAdmissionValue(admissionData.qsRanking) && (
                 <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
                   <div className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">QS World Ranking</div>
                   <div className="text-sm font-bold text-gray-800">{admissionData.qsRanking}</div>
                 </div>
               )}
-              {admissionData.tuition?.value && admissionData.tuition.value !== '未找到官方数据' && (
+              {hasAdmissionValue(admissionData.tuition?.value) && (
                 <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
                   <div className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1">学费</div>
                   <div className="text-sm font-bold text-gray-800">{admissionData.tuition.value}</div>
                   {admissionData.tuition.sourceUrl && <a href={admissionData.tuition.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
                 </div>
               )}
-              {admissionData.deadline?.value && admissionData.deadline.value !== '未找到官方数据' && (
+              {hasAdmissionValue(admissionData.deadline?.value) && (
                 <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
                   <div className="text-[9px] font-black text-red-600 uppercase tracking-widest mb-1">申请截止</div>
                   <div className="text-sm font-bold text-gray-800">{admissionData.deadline.value}</div>
                   {admissionData.deadline.sourceUrl && <a href={admissionData.deadline.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
                 </div>
               )}
-              {admissionData.requirements?.value && admissionData.requirements.value !== '未找到官方数据' && (
+              {hasAdmissionValue(admissionData.requirements?.value) && (
                 <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
                   <div className="text-[9px] font-black text-indigo-600 uppercase tracking-widest mb-1">申请要求</div>
                   <div className="text-sm font-bold text-gray-800">{admissionData.requirements.value}</div>
                   {admissionData.requirements.sourceUrl && <a href={admissionData.requirements.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
                 </div>
               )}
-              {admissionData.scholarships?.value && admissionData.scholarships.value !== '未找到官方数据' && (
+              {hasAdmissionValue(admissionData.scholarships?.value) && (
                 <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
                   <div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">奖学金</div>
                   <div className="text-sm font-bold text-gray-800">{admissionData.scholarships.value}</div>
@@ -832,7 +852,15 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
               )}
             </div>
           ) : (
-            <div className="text-center text-sm text-gray-400 py-4 bg-gray-50 rounded-2xl">暂未查询到招生数据</div>
+            <div
+              className={`rounded-2xl py-4 text-center text-sm ${
+                admissionStatusTone === 'error'
+                  ? 'border border-rose-100 bg-rose-50 text-rose-600'
+                  : 'bg-gray-50 text-gray-400'
+              }`}
+            >
+              {admissionStatusMessage || '暂未查询到招生数据'}
+            </div>
           )}
         </div>
         )}

@@ -8,6 +8,16 @@ import {
 
 const MULTI_VALUE_SPLIT_REGEX = /[\n,;|/，；、]+/;
 
+function ensureArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function ensureStringArray(value: unknown): string[] {
+  return ensureArray<unknown>(value)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
 export function splitMultiValue(value?: string | string[] | null): string[] {
   if (Array.isArray(value)) {
     return Array.from(new Set(value.map((item) => String(item || '').trim()).filter(Boolean)));
@@ -108,10 +118,30 @@ export function buildSelectionProfilePatch(profile: ClientSelectionProfile): Par
 }
 
 export function syncClientSelectionProfile(client: Client): Client {
+  const educations = ensureArray<Client['educations'][number]>(client.educations);
+  const works = ensureArray<Client['works'][number]>(client.works);
+  const awards = ensureArray<Client['awards'][number]>(client.awards);
+  const contacts = ensureArray<Client['contacts'][number]>(client.contacts);
+  const documents = ensureArray<Client['documents'][number]>(client.documents);
+  const researchPapers = ensureArray<Client['researchPapers'][number]>(client.researchPapers);
+  const identityDocs = ensureArray<Client['identityDocs'][number]>(client.identityDocs);
+  const linkedFacultyIds = ensureStringArray(client.linkedFacultyIds);
+  const mentorRecommendations = ensureArray<Client['mentorRecommendations'][number]>(client.mentorRecommendations);
+  const events = ensureArray<Client['events'][number]>(client.events);
+
   return {
     ...client,
+    educations,
+    works,
+    awards,
+    contacts,
+    documents,
+    researchPapers,
+    identityDocs,
+    linkedFacultyIds,
+    mentorRecommendations,
+    events,
     ...buildSelectionProfilePatch(buildSelectionProfile(client)),
-    mentorRecommendations: client.mentorRecommendations || [],
   };
 }
 

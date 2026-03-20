@@ -11,6 +11,19 @@ const DEFAULT_RUNTIME_CONFIG: ScholarSyncDesktopConfig = {
   geminiModel: 'gemini-2.5-flash',
 };
 
+const injectedOpenAIApiKey = process.env.OPENAI_API_KEY || '';
+const injectedGeminiApiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+
+const pickConfiguredValue = (...values: Array<string | undefined>) => {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return '';
+};
+
 const hasDesktopBridge = () =>
   typeof window !== 'undefined' && typeof window.scholarSyncDesktop !== 'undefined';
 
@@ -86,15 +99,10 @@ export const getRuntimeConfig = (): ScholarSyncDesktopConfig => {
     ...desktopConfig,
     preferredProvider: desktopConfig?.preferredProvider || browserConfig.preferredProvider || 'openai',
     fallbackProvider: desktopConfig?.fallbackProvider || browserConfig.fallbackProvider || 'gemini',
-    openaiApiKey: desktopConfig?.openaiApiKey || browserConfig.openaiApiKey || '',
-    geminiApiKey:
-      desktopConfig?.geminiApiKey ||
-      browserConfig.geminiApiKey ||
-      process.env.GEMINI_API_KEY ||
-      process.env.API_KEY ||
-      '',
-    openaiModel: desktopConfig?.openaiModel || browserConfig.openaiModel || 'gpt-5',
-    geminiModel: desktopConfig?.geminiModel || browserConfig.geminiModel || 'gemini-2.5-flash',
+    openaiApiKey: pickConfiguredValue(desktopConfig?.openaiApiKey, browserConfig.openaiApiKey, injectedOpenAIApiKey),
+    geminiApiKey: pickConfiguredValue(desktopConfig?.geminiApiKey, browserConfig.geminiApiKey, injectedGeminiApiKey),
+    openaiModel: pickConfiguredValue(desktopConfig?.openaiModel, browserConfig.openaiModel, 'gpt-5'),
+    geminiModel: pickConfiguredValue(desktopConfig?.geminiModel, browserConfig.geminiModel, 'gemini-2.5-flash'),
   };
 };
 

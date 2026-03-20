@@ -6,11 +6,26 @@ import { getRuntimeConfig } from "./persistentStorage";
 type Provider = 'openai' | 'gemini';
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_GEMINI_WEB_FALLBACK_MODEL = 'gemini-2.5-pro';
 const DEFAULT_OPENAI_WEB_MODEL = 'gpt-5';
+const EMPTY_OFFICIAL_SOURCE_VALUES = ['未找到官方数据', 'Not found in official sources'] as const;
+
+type WebSearchJsonOptions<T> = {
+  schemaName: string;
+  openAISchema: Record<string, unknown>;
+  geminiSchema?: Schema;
+  openAIModel?: string;
+  geminiModel?: string;
+  allowedDomains?: string[];
+  parse: (text: string, provider: Provider) => T;
+};
 
 export interface ChatSession {
   sendMessage: (input: { message: string }) => Promise<{ text: string }>;
 }
+
+const getConfiguredOpenAIApiKey = () => getRuntimeConfig().openaiApiKey || process.env.OPENAI_API_KEY || '';
+const getConfiguredGeminiApiKey = () => getRuntimeConfig().geminiApiKey || process.env.GEMINI_API_KEY || process.env.API_KEY || '';
 
 const getProviderOrder = (preferred?: Provider, fallback?: Provider): Provider[] => {
   const config = getRuntimeConfig();
@@ -20,8 +35,7 @@ const getProviderOrder = (preferred?: Provider, fallback?: Provider): Provider[]
 };
 
 const isProviderConfigured = (provider: Provider) => {
-  const config = getRuntimeConfig();
-  return provider === 'openai' ? Boolean(config.openaiApiKey) : Boolean(config.geminiApiKey || process.env.GEMINI_API_KEY || process.env.API_KEY);
+  return provider === 'openai' ? Boolean(getConfiguredOpenAIApiKey()) : Boolean(getConfiguredGeminiApiKey());
 };
 
 export const isOpenAIConfigured = () => isProviderConfigured('openai');
@@ -34,7 +48,15 @@ const getConfiguredGeminiModel = (fallback: string = DEFAULT_GEMINI_MODEL) => {
 };
 
 const getGeminiSearchModel = () => getConfiguredGeminiModel(DEFAULT_GEMINI_MODEL);
+const getGeminiWebSearchModelCandidates = (preferred?: string) =>
+  Array.from(
+    new Set(
+      [preferred?.trim(), getGeminiSearchModel(), DEFAULT_GEMINI_WEB_FALLBACK_MODEL]
+        .filter(Boolean) as string[],
+    ),
+  );
 
+/*
 export const describeGeminiError = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error || '');
 
@@ -60,6 +82,10 @@ export const describeGeminiError = (error: unknown) => {
 export const describeWebSearchError = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error || '');
 
+  if (message.includes('No web search provider configured') || message.includes('No AI provider is configured')) {
+    return '联网搜索需要配置 OpenAI 或 Gemini API Key。';
+  }
+
   if (message.includes('fetch failed') || message.includes('UND_ERR_CONNECT_TIMEOUT') || message.includes('Connect Timeout Error')) {
     return '无法连接到 OpenAI 联网搜索服务，当前更像是网络超时或代理 / 防火墙拦截，而不是 API Key 问题。';
   }
@@ -77,10 +103,147 @@ export const describeWebSearchError = (error: unknown) => {
   }
 
   if (message.toLowerCase().includes('all web search providers failed')) {
-    return message.replace(/^All web search providers failed:\s*/i, '');
+    return message.replace(new RegExp('^All web search providers failed:\\s*', 'i'), '');
   }
 
   return describeGeminiError(error);
+};
+
+*/
+
+const getErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error || ''));
+
+const summarizeTechnicalError = (error: unknown, maxLength = 180) => {
+  const compact = getErrorMessage(error)
+    .replace(/sk-[A-Za-z0-9_-]+/g, 'sk-***')
+    .replace(/AIza[0-9A-Za-z_-]+/g, 'AIza***')
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer ***')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!compact) {
+    return '';
+  }
+
+  return compact.length > maxLength ? `${compact.slice(0, maxLength)}...` : compact;
+};
+
+const buildUnknownProviderError = (providerLabel: string, error: unknown) => {
+  const detail = summarizeTechnicalError(error);
+  return detail
+    ? `${providerLabel} 联网检索暂时不可用：${detail}`
+    : `${providerLabel} 联网检索暂时不可用，请稍后重试。`;
+};
+
+const isGeminiWebSearchStructuredOutputUnsupported = (error: unknown) => {
+  const lowerMessage = getErrorMessage(error).toLowerCase();
+  return (
+    lowerMessage.includes('schema') ||
+    lowerMessage.includes('response schema') ||
+    lowerMessage.includes('response_schema') ||
+    lowerMessage.includes('google search') ||
+    lowerMessage.includes('googlesearch') ||
+    lowerMessage.includes('tool')
+  );
+};
+
+const shouldRetryGeminiWebSearchWithFallbackModel = (error: unknown) => {
+  const lowerMessage = getErrorMessage(error).toLowerCase();
+  return (
+    isGeminiWebSearchStructuredOutputUnsupported(error) ||
+    lowerMessage.includes('404') ||
+    lowerMessage.includes('unsupported model') ||
+    (lowerMessage.includes('model') && (lowerMessage.includes('not found') || lowerMessage.includes('not exist')))
+  );
+};
+
+export const describeGeminiError = (error: unknown) => {
+  const message = getErrorMessage(error);
+  const lowerMessage = message.toLowerCase();
+
+  if (message.includes('fetch failed') || message.includes('UND_ERR_CONNECT_TIMEOUT') || message.includes('Connect Timeout Error')) {
+    return '无法连接到 Gemini 服务，当前更像是网络超时、代理或防火墙问题，而不是 API Key 问题。';
+  }
+
+  if (message.includes('No Gemini API key configured')) {
+    return '当前联网检索依赖 Gemini，请先在设置页确认 Gemini API Key 已保存。';
+  }
+
+  if (message.includes('401') || message.includes('403') || lowerMessage.includes('api key')) {
+    return 'Gemini API Key 校验失败，请在设置页重新保存后再试。';
+  }
+
+  if (message.includes('429') || lowerMessage.includes('rate limit') || lowerMessage.includes('quota')) {
+    return 'Gemini 请求达到速率或额度限制，请稍后重试，或检查当前账号额度。';
+  }
+
+  if (
+    message.includes('400') &&
+    (
+      lowerMessage.includes('schema') ||
+      lowerMessage.includes('response schema') ||
+      lowerMessage.includes('response_schema') ||
+      lowerMessage.includes('google search') ||
+      lowerMessage.includes('googlesearch') ||
+      lowerMessage.includes('tool')
+    )
+  ) {
+    return 'Gemini 联网检索请求格式或工具能力不被当前模型支持，请尝试切换 Gemini 模型，或暂时改用 OpenAI。';
+  }
+
+  if (
+    message.includes('404') ||
+    lowerMessage.includes('unsupported model') ||
+    (lowerMessage.includes('model') && (lowerMessage.includes('not found') || lowerMessage.includes('not exist')))
+  ) {
+    return `Gemini 联网检索模型不可用，请检查设置页里的 Gemini 模型名称。当前保存值：${getConfiguredGeminiModel()}`;
+  }
+
+  return buildUnknownProviderError('Gemini', error);
+};
+
+export const describeWebSearchError = (error: unknown) => {
+  const message = getErrorMessage(error);
+  const lowerMessage = message.toLowerCase();
+
+  if (message.includes('No web search provider configured') || message.includes('No AI provider is configured')) {
+    return '联网搜索需要配置 OpenAI 或 Gemini API Key。';
+  }
+
+  if (message.includes('fetch failed') || message.includes('UND_ERR_CONNECT_TIMEOUT') || message.includes('Connect Timeout Error')) {
+    return '无法连接到 OpenAI 联网搜索服务，当前更像是网络超时、代理或防火墙问题，而不是 API Key 问题。';
+  }
+
+  if (message.includes('No OpenAI API key configured')) {
+    return '当前联网检索优先依赖 OpenAI，请先在设置页确认 OpenAI API Key 已保存。';
+  }
+
+  if (message.includes('OpenAI request failed (401)') || message.includes('OpenAI request failed (403)')) {
+    return 'OpenAI API Key 校验失败，联网检索无法继续。';
+  }
+
+  if (message.includes('OpenAI request failed (429)') || lowerMessage.includes('rate limit') || lowerMessage.includes('quota')) {
+    return 'OpenAI 请求达到速率或额度限制，请稍后重试，或检查当前账号额度。';
+  }
+
+  if (lowerMessage.includes('invalid schema for response_format') || (lowerMessage.includes('response_format') && lowerMessage.includes('schema'))) {
+    return 'OpenAI 联网检索返回格式配置有误，当前请求已被服务端拒绝。';
+  }
+
+  if (
+    message.includes('OpenAI request failed (404)') ||
+    (message.includes('OpenAI request failed (400)') &&
+      (lowerMessage.includes('web_search') || lowerMessage.includes('unsupported') || lowerMessage.includes('tool'))) ||
+    (lowerMessage.includes('openai') && lowerMessage.includes('model'))
+  ) {
+    return `OpenAI 联网检索模型不可用，请检查设置页里的 OpenAI 模型名称。当前保存值：${getRuntimeConfig().openaiModel || DEFAULT_OPENAI_WEB_MODEL}`;
+  }
+
+  if (lowerMessage.includes('all web search providers failed')) {
+    return message.replace(/^All web search providers failed:\s*/i, '');
+  }
+
+  return buildUnknownProviderError('OpenAI', error);
 };
 
 const extractAllowedDomains = (...urls: Array<string | undefined>) =>
@@ -101,8 +264,7 @@ const extractAllowedDomains = (...urls: Array<string | undefined>) =>
 
 // Initialize the Gemini client
 const getGeminiClient = () => {
-  const config = getRuntimeConfig();
-  const apiKey = config.geminiApiKey || process.env.GEMINI_API_KEY || process.env.API_KEY;
+  const apiKey = getConfiguredGeminiApiKey();
   if (!apiKey) {
     throw new Error("No Gemini API key configured. Please update the desktop provider config.");
   }
@@ -115,6 +277,162 @@ const stripCodeFences = (value: string): string =>
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim();
+
+const parseJsonResponse = <T>(text: string): T => JSON.parse(stripCodeFences(text)) as T;
+
+const OPENAI_ARRAY_SCHEMA_RESULT_KEY = 'results';
+
+const prepareOpenAIJsonSchema = (schema?: Record<string, unknown>) => {
+  if (!schema) {
+    return null;
+  }
+
+  if (schema.type !== 'array') {
+    return {
+      schema,
+      unwrap: (text: string) => text,
+    };
+  }
+
+  return {
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        [OPENAI_ARRAY_SCHEMA_RESULT_KEY]: schema,
+      },
+      required: [OPENAI_ARRAY_SCHEMA_RESULT_KEY],
+    } satisfies Record<string, unknown>,
+    unwrap: (text: string) => {
+      const parsed = parseJsonResponse<Record<string, unknown>>(text);
+      const results = parsed?.[OPENAI_ARRAY_SCHEMA_RESULT_KEY];
+
+      if (!Array.isArray(results)) {
+        throw new Error('OpenAI web search returned invalid wrapped JSON.');
+      }
+
+      return JSON.stringify(results);
+    },
+  };
+};
+
+const createEmptyMatchReasoning = (): FacultyMember['matchReasoning'] => ({
+  locationCheck: '',
+  universityCheck: '',
+  departmentCheck: '',
+  researchFit: '',
+  positionCheck: '',
+  activityCheck: '',
+  reputationCheck: '',
+});
+
+const sanitizeHttpUrl = (value?: string, options?: { allowRoot?: boolean }) => {
+  const candidate = value?.trim();
+  if (!candidate) return '';
+
+  try {
+    const parsed = new URL(candidate);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    if (!options?.allowRoot && (parsed.pathname === '/' || parsed.pathname === '')) return '';
+    return candidate;
+  } catch {
+    return '';
+  }
+};
+
+const sanitizeEmail = (value?: string) => {
+  const candidate = value?.trim();
+  return candidate && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) ? candidate : '';
+};
+
+const sanitizeMatchReasoning = (
+  value?: Partial<FacultyMember['matchReasoning']>,
+  fallback?: FacultyMember['matchReasoning'],
+): FacultyMember['matchReasoning'] => ({
+  locationCheck: value?.locationCheck?.trim() || fallback?.locationCheck || '',
+  universityCheck: value?.universityCheck?.trim() || fallback?.universityCheck || '',
+  departmentCheck: value?.departmentCheck?.trim() || fallback?.departmentCheck || '',
+  researchFit: value?.researchFit?.trim() || fallback?.researchFit || '',
+  positionCheck: value?.positionCheck?.trim() || fallback?.positionCheck || '',
+  activityCheck: value?.activityCheck?.trim() || fallback?.activityCheck || '',
+  reputationCheck: value?.reputationCheck?.trim() || fallback?.reputationCheck || '',
+});
+
+const normalizeFacultyMember = (value: Partial<FacultyMember>, fallback?: FacultyMember): FacultyMember => ({
+  name: value.name?.trim() || fallback?.name || '',
+  title: value.title?.trim() || fallback?.title || '',
+  university: value.university?.trim() || fallback?.university || '',
+  school: value.school?.trim() || fallback?.school || '',
+  department: value.department?.trim() || fallback?.department || '',
+  matchScore: typeof value.matchScore === 'number' ? value.matchScore : fallback?.matchScore || 0,
+  researchAreas: Array.isArray(value.researchAreas)
+    ? value.researchAreas.map((item) => item?.trim()).filter(Boolean) as string[]
+    : fallback?.researchAreas || [],
+  alignmentDetails: value.alignmentDetails?.trim() || fallback?.alignmentDetails || '',
+  activitySummary: value.activitySummary?.trim() || fallback?.activitySummary || '',
+  recentActivities: Array.isArray(value.recentActivities)
+    ? value.recentActivities.map((item) => item?.trim()).filter(Boolean) as string[]
+    : fallback?.recentActivities || [],
+  isActive: typeof value.isActive === 'boolean' ? value.isActive : fallback?.isActive ?? true,
+  profileUrl: sanitizeHttpUrl(value.profileUrl) || fallback?.profileUrl || '',
+  photoUrl: sanitizeHttpUrl(value.photoUrl, { allowRoot: true }) || fallback?.photoUrl || '',
+  email: sanitizeEmail(value.email) || fallback?.email || '',
+  qsRanking: value.qsRanking?.trim() || fallback?.qsRanking || '',
+  qsRankingData: value.qsRankingData || fallback?.qsRankingData,
+  deadlineData: value.deadlineData || fallback?.deadlineData,
+  applicationReqsData: value.applicationReqsData || fallback?.applicationReqsData,
+  rpReqsData: value.rpReqsData || fallback?.rpReqsData,
+  tuitionData: value.tuitionData || fallback?.tuitionData,
+  scholarshipData: value.scholarshipData || fallback?.scholarshipData,
+  programUrl: sanitizeHttpUrl(value.programUrl, { allowRoot: true }) || fallback?.programUrl || '',
+  universityUrl: sanitizeHttpUrl(value.universityUrl, { allowRoot: true }) || fallback?.universityUrl || '',
+  matchReasoning: sanitizeMatchReasoning(value.matchReasoning, fallback?.matchReasoning || createEmptyMatchReasoning()),
+  matchSource: value.matchSource || fallback?.matchSource,
+  evidenceUrls: Array.isArray(value.evidenceUrls)
+    ? value.evidenceUrls.map((item) => sanitizeHttpUrl(item, { allowRoot: true })).filter(Boolean)
+    : fallback?.evidenceUrls,
+  evaluation: value.evaluation || fallback?.evaluation,
+  dimensionTags: Array.isArray(value.dimensionTags) ? value.dimensionTags.filter(Boolean) : fallback?.dimensionTags,
+});
+
+const normalizeFacultyResults = (value: Array<Partial<FacultyMember>>) =>
+  value.map((item) => normalizeFacultyMember(item)).filter((item) => Boolean(item.name && item.university));
+
+/*
+
+const normalizeSourceData = (value?: { value?: string; sourceUrl?: string }) => ({
+  value: value?.value?.trim() || '未找到官方数据',
+  sourceUrl: sanitizeHttpUrl(value?.sourceUrl, { allowRoot: true }),
+});
+
+const hasMeaningfulSourceValue = (value?: string) => {
+  const normalized = value?.trim();
+  return Boolean(normalized && normalized !== '未找到官方数据');
+};
+
+*/
+
+const normalizeSourceData = (value?: { value?: string; sourceUrl?: string }) => ({
+  value: value?.value?.trim() || EMPTY_OFFICIAL_SOURCE_VALUES[1],
+  sourceUrl: sanitizeHttpUrl(value?.sourceUrl, { allowRoot: true }),
+});
+
+const hasMeaningfulSourceValue = (value?: string) => {
+  const normalized = value?.trim();
+  return Boolean(normalized && !EMPTY_OFFICIAL_SOURCE_VALUES.includes(normalized as (typeof EMPTY_OFFICIAL_SOURCE_VALUES)[number]));
+};
+
+const combineProviderErrors = (messages: string[]) => {
+  const uniqueMessages = Array.from(
+    new Set(
+      messages
+        .map((message) => message.trim())
+        .filter(Boolean),
+    ),
+  );
+
+  return uniqueMessages.join('；');
+};
 
 const extractOpenAIText = (payload: any): string => {
   if (typeof payload?.output_text === 'string' && payload.output_text.trim()) {
@@ -144,7 +462,7 @@ const extractOpenAIText = (payload: any): string => {
 
 const runOpenAITextPrompt = async (prompt: string, options?: { systemInstruction?: string; model?: string }): Promise<string> => {
   const config = getRuntimeConfig();
-  const apiKey = config.openaiApiKey;
+  const apiKey = getConfiguredOpenAIApiKey();
   if (!apiKey) {
     throw new Error('No OpenAI API key configured.');
   }
@@ -190,7 +508,8 @@ const runOpenAIWebSearchPrompt = async (
   },
 ): Promise<string> => {
   const config = getRuntimeConfig();
-  const apiKey = config.openaiApiKey;
+  const apiKey = getConfiguredOpenAIApiKey();
+  const preparedJsonSchema = prepareOpenAIJsonSchema(options?.jsonSchema);
   if (!apiKey) {
     throw new Error('No OpenAI API key configured.');
   }
@@ -219,13 +538,13 @@ const runOpenAIWebSearchPrompt = async (
     ],
   };
 
-  if (options?.jsonSchema) {
+  if (preparedJsonSchema) {
     payload.text = {
       format: {
         type: 'json_schema',
         name: options.schemaName || 'web_search_result',
         strict: true,
-        schema: options.jsonSchema,
+        schema: preparedJsonSchema.schema,
       },
     };
   }
@@ -249,7 +568,104 @@ const runOpenAIWebSearchPrompt = async (
   if (!text) {
     throw new Error('OpenAI web search returned an empty response.');
   }
-  return text;
+  return preparedJsonSchema ? preparedJsonSchema.unwrap(text) : text;
+};
+
+const runGeminiWebSearchPrompt = async (
+  prompt: string,
+  options?: { model?: string; responseSchema?: Schema },
+): Promise<string> => {
+  const ai = getGeminiClient();
+  const models = getGeminiWebSearchModelCandidates(options?.model);
+  let lastError: unknown;
+
+  const runAttempt = async (model: string, promptText: string, responseSchema?: Schema) => {
+    const response = await ai.models.generateContent({
+      model,
+      contents: [{ role: 'user', parts: [{ text: promptText }] }],
+      config: {
+        responseMimeType: 'application/json',
+        ...(responseSchema ? { responseSchema } : {}),
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    const text = response.text?.trim();
+    if (!text) {
+      throw new Error('Gemini web search returned an empty response.');
+    }
+
+    return text;
+  };
+
+  for (const model of models) {
+    try {
+      return await runAttempt(model, prompt, options?.responseSchema);
+    } catch (error) {
+      lastError = error;
+
+      if (options?.responseSchema && isGeminiWebSearchStructuredOutputUnsupported(error)) {
+        try {
+          console.warn(`Gemini web search structured output is unsupported for ${model}, retrying without response schema.`, error);
+          return await runAttempt(
+            model,
+            `${prompt}\n\nReturn only valid JSON matching the requested schema. Do not include Markdown fences or explanatory text.`,
+          );
+        } catch (fallbackError) {
+          lastError = fallbackError;
+        }
+      }
+
+      if (!shouldRetryGeminiWebSearchWithFallbackModel(error)) {
+        break;
+      }
+
+      console.warn(`Gemini web search model ${model} failed, trying fallback model if available.`, error);
+    }
+  }
+
+  throw lastError || new Error('Gemini web search failed.');
+};
+
+const runPreferredWebSearchJson = async <T>(prompt: string, options: WebSearchJsonOptions<T>): Promise<T> => {
+  const providers = getProviderOrder();
+  const errors: string[] = [];
+  let attempted = false;
+
+  for (const provider of providers) {
+    if (!isProviderConfigured(provider)) {
+      continue;
+    }
+
+    attempted = true;
+
+    try {
+      if (provider === 'openai') {
+        const text = await runOpenAIWebSearchPrompt(prompt, {
+          model: options.openAIModel || getRuntimeConfig().openaiModel || DEFAULT_OPENAI_WEB_MODEL,
+          jsonSchema: options.openAISchema,
+          schemaName: options.schemaName,
+          allowedDomains: options.allowedDomains,
+        });
+        return options.parse(text, provider);
+      }
+
+      const text = await runGeminiWebSearchPrompt(prompt, {
+        model: options.geminiModel || getGeminiSearchModel(),
+        responseSchema: options.geminiSchema,
+      });
+      return options.parse(text, provider);
+    } catch (error) {
+      console.warn(`Web search provider ${provider} failed, trying fallback if available.`, error);
+      errors.push(provider === 'openai' ? describeWebSearchError(error) : describeGeminiError(error));
+    }
+  }
+
+  if (!attempted) {
+    throw new Error('No web search provider configured. Please configure OpenAI or Gemini API key.');
+  }
+
+  throw new Error(`All web search providers failed: ${combineProviderErrors(errors)}`);
 };
 
 const runGeminiTextPrompt = async (
@@ -321,7 +737,7 @@ const runPreferredTextPrompt = async (
 
 const getClient = getGeminiClient;
 
-const MODEL_FACULTY_MATCHER = DEFAULT_GEMINI_MODEL;
+const MODEL_FACULTY_MATCHER = DEFAULT_GEMINI_WEB_FALLBACK_MODEL;
 const MODEL_IMAGE_GEN = 'gemini-3-pro-image-preview';
 const MODEL_CHAT = DEFAULT_GEMINI_MODEL;
 const MODEL_FAST = 'gemini-flash-lite-latest'; // Use Flash Lite for fast text parsing
@@ -377,6 +793,25 @@ interface MatchParams {
   exclusions?: string;
   businessInfo?: string;
 }
+
+const buildLooseFacultySearchQuery = (params: MatchParams) => {
+  const targetScope = params.targets
+    .map((target) => [target.region, target.university].filter(Boolean).join(' '))
+    .filter(Boolean)
+    .join(' / ');
+
+  return [
+    targetScope,
+    params.department,
+    params.targetPosition,
+    params.entryYear ? `${params.entryYear} intake` : '',
+    params.scholarship ? `scholarship ${params.scholarship}` : '',
+    'faculty official profile research',
+  ]
+    .filter(Boolean)
+    .join(' / ')
+    .trim();
+};
 
 interface ParsedRequirements {
   profileSummary: string;
@@ -752,23 +1187,22 @@ ${isInterdisciplinary ? `
     ${departmentKeywords.map(k => `"${k}": ✅ 覆盖 / ❌ 未覆盖 + 说明`).join('\n    ')}
 ` : ''}
 
-    **ACADEMIC RANK / POSITION LOGIC (STRICT - DEFAULT IS FULL PROFESSOR)**:
-    - **DEFAULT RULE**: If 'Target Position' is empty or vague, you MUST ONLY return **FULL PROFESSORS** (正教授).
+    **ACADEMIC RANK / POSITION LOGIC (PRIORITIZE SENIOR FACULTY)**:
+    - **DEFAULT RULE**: If 'Target Position' is empty or vague, PRIORITIZE **FULL / ASSOCIATE PROFESSORS** first, but if results are too sparse, you MAY include strong Assistant Professors / Lecturers with a lower matchScore.
     - **Regional Mapping**:
       - **USA/Canada**: "Professor" = Full. "Associate" = Mid. "Assistant" = Junior.
       - **UK/Australia/HK**: "Professor/Chair" = Full. "Reader" = Senior/Full. "Senior Lecturer" = Associate. "Lecturer" = Assistant.
     - **Filtering**:
-      - User says "Professor" (or empty) -> **Full Professor ONLY**.
+      - User says "Professor" -> Prefer Full Professor, then Associate if needed.
       - User says "Associate" -> Full & Associate accepted.
       - User says "Assistant" or "Any" -> All accepted.
 
     **URL & DATA SOURCING RULES**:
-    - You are using Google Search and can see search result titles, snippets, and URLs.
-    - For profileUrl: ONLY copy a URL you directly see in Google Search results. Do NOT construct or guess URLs based on URL patterns.
-    - If no profile URL appears in search results for a professor, set profileUrl to "" (empty string).
-    - For email: ONLY use emails explicitly shown in search result snippets. If not found, set to "".
-    - For photoUrl: If you see a photo URL in search results, include it. Otherwise set to "".
-    - This protocol exists because you CANNOT open web pages to verify them. Only use what you SEE in search snippets.
+    - Prefer official faculty profile pages, department directories, lab pages, or university people pages as profileUrl.
+    - If you cannot verify an exact faculty profile URL, you MAY keep profileUrl as "" and still return the candidate.
+    - If no official email is clearly available, set email to "" instead of dropping the candidate.
+    - For photoUrl: If you see a reliable photo URL, include it. Otherwise set to "".
+    - Do NOT fabricate URLs or emails, but do not discard an otherwise strong candidate solely because email/photo/profile URL is missing.
 
     **NEGATIVE FILTER**: Exclude any names/universities in "EXCLUSIONS".
 
@@ -798,7 +1232,8 @@ ${isInterdisciplinary ? `
     - Top of the list MUST be the newest (${currentYear}/${currentYear-1}).
 
     Constraints:
-    - **No Hallucinations**: If a URL or email is uncertain, DROP the candidate.
+    - **No Hallucinations**: If a URL or email is uncertain, leave it empty instead of inventing it.
+    - **Prefer useful partial matches over empty results**: If admission data is incomplete, you may still return a strong faculty candidate with missing fields left empty.
     - **No "Non-Chinese Citizen" Clause**: Do not hallucinate admission requirements.
   `;
 
@@ -932,6 +1367,16 @@ ${isInterdisciplinary ? `
       photoUrl: prof.photoUrl && prof.photoUrl.startsWith('http') ? prof.photoUrl : '',
     }));
 
+  const runLooseFacultyFallback = async () => {
+    const fallbackQuery = buildLooseFacultySearchQuery(params);
+    if (!fallbackQuery) {
+      return [];
+    }
+
+    console.warn('Structured faculty matching returned no usable results, retrying with loose faculty web search query.', fallbackQuery);
+    return (await searchFacultyByWeb(fallbackQuery)).slice(0, totalCount);
+  };
+
   const allowedDomains = extractAllowedDomains(directoryUrl);
   let openAIWebSearchError: unknown = null;
 
@@ -943,30 +1388,24 @@ ${isInterdisciplinary ? `
         schemaName: 'faculty_matches',
         allowedDomains,
       });
-      return sanitizeFacultyResults(JSON.parse(stripCodeFences(jsonText || '[]')) as FacultyMember[]);
+      const results = sanitizeFacultyResults(JSON.parse(stripCodeFences(jsonText || '[]')) as FacultyMember[]);
+      if (results.length > 0) {
+        return results;
+      }
+      console.warn('OpenAI structured faculty matching returned no results, falling back to Gemini.');
     } catch (error) {
       openAIWebSearchError = error;
       console.warn('OpenAI web search failed, falling back to Gemini.', error);
     }
   }
 
-  const ai = getGeminiClient();
-
   try {
-      const response = await ai.models.generateContent({
-        model: getGeminiSearchModel() || MODEL_FACULTY_MATCHER,
-      contents: promptContent,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: responseSchema,
-        tools: [{googleSearch: {}}], 
-      }
+    const jsonText = await runGeminiWebSearchPrompt(promptContent, {
+      model: MODEL_FACULTY_MATCHER,
+      responseSchema,
     });
-
-    const jsonText = response.text || "[]";
-    const rawResults = JSON.parse(jsonText) as FacultyMember[];
-    // 清洗：过滤明显无效的数据
-    return rawResults.map(prof => ({
+    const rawResults = JSON.parse(stripCodeFences(jsonText)) as FacultyMember[];
+    const structuredResults = rawResults.map(prof => ({
       ...prof,
       // URL 基础验证：必须是 http(s) 开头且非纯域名首页
       profileUrl: (() => {
@@ -983,10 +1422,29 @@ ${isInterdisciplinary ? `
       // photoUrl 验证
       photoUrl: prof.photoUrl && prof.photoUrl.startsWith('http') ? prof.photoUrl : '',
     }));
+    if (structuredResults.length > 0) {
+      return structuredResults;
+    }
+
+    return await runLooseFacultyFallback();
   } catch (error) {
     console.error("Faculty matching failed:", error);
+    try {
+      const fallbackResults = await runLooseFacultyFallback();
+      if (fallbackResults.length > 0) {
+        return fallbackResults;
+      }
+    } catch (fallbackError) {
+      console.error('Loose faculty web search fallback failed:', fallbackError);
+    }
+
     if (openAIWebSearchError) {
-      throw new Error(`All web search providers failed: ${describeWebSearchError(openAIWebSearchError)}；${describeGeminiError(error)}`);
+      throw new Error(
+        `All web search providers failed: ${combineProviderErrors([
+          describeWebSearchError(openAIWebSearchError),
+          describeGeminiError(error),
+        ])}`,
+      );
     }
     throw error;
   }
@@ -1574,8 +2032,6 @@ export const parseClientFile = async (fileData: string, mimeType: string = 'text
 };
 
 export const searchFacultyByWeb = async (query: string): Promise<FacultyMember[]> => {
-  const ai = getClient();
-  
   const prompt = `
     Task: Search for faculty members based on the query: "${query}".
     
@@ -1622,26 +2078,141 @@ export const searchFacultyByWeb = async (query: string): Promise<FacultyMember[]
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: getGeminiSearchModel(),
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: 'application/json',
-        tools: [{ googleSearch: {} }]
-      }
+    const geminiSchema: Schema = {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          name: { type: Type.STRING },
+          title: { type: Type.STRING },
+          university: { type: Type.STRING },
+          school: { type: Type.STRING },
+          department: { type: Type.STRING },
+          email: { type: Type.STRING },
+          profileUrl: { type: Type.STRING },
+          photoUrl: { type: Type.STRING },
+          researchAreas: { type: Type.ARRAY, items: { type: Type.STRING } },
+          recentActivities: { type: Type.ARRAY, items: { type: Type.STRING } },
+          activitySummary: { type: Type.STRING },
+          isActive: { type: Type.BOOLEAN },
+          matchScore: { type: Type.INTEGER },
+          alignmentDetails: { type: Type.STRING },
+          matchReasoning: {
+            type: Type.OBJECT,
+            properties: {
+              locationCheck: { type: Type.STRING },
+              universityCheck: { type: Type.STRING },
+              departmentCheck: { type: Type.STRING },
+              positionCheck: { type: Type.STRING },
+              activityCheck: { type: Type.STRING },
+              reputationCheck: { type: Type.STRING },
+              researchFit: { type: Type.STRING },
+            },
+            required: [
+              'locationCheck',
+              'universityCheck',
+              'departmentCheck',
+              'positionCheck',
+              'activityCheck',
+              'reputationCheck',
+              'researchFit',
+            ],
+          },
+        },
+        required: [
+          'name',
+          'title',
+          'university',
+          'researchAreas',
+          'recentActivities',
+          'activitySummary',
+          'isActive',
+          'matchScore',
+          'alignmentDetails',
+          'matchReasoning',
+        ],
+      },
+    };
+
+    const openAISchema = {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string' },
+          title: { type: 'string' },
+          university: { type: 'string' },
+          school: { type: 'string' },
+          department: { type: 'string' },
+          email: { type: 'string' },
+          profileUrl: { type: 'string' },
+          photoUrl: { type: 'string' },
+          researchAreas: { type: 'array', items: { type: 'string' } },
+          recentActivities: { type: 'array', items: { type: 'string' } },
+          activitySummary: { type: 'string' },
+          isActive: { type: 'boolean' },
+          matchScore: { type: 'integer' },
+          alignmentDetails: { type: 'string' },
+          matchReasoning: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              locationCheck: { type: 'string' },
+              universityCheck: { type: 'string' },
+              departmentCheck: { type: 'string' },
+              positionCheck: { type: 'string' },
+              activityCheck: { type: 'string' },
+              reputationCheck: { type: 'string' },
+              researchFit: { type: 'string' },
+            },
+            required: [
+              'locationCheck',
+              'universityCheck',
+              'departmentCheck',
+              'positionCheck',
+              'activityCheck',
+              'reputationCheck',
+              'researchFit',
+            ],
+          },
+        },
+        required: [
+          'name',
+          'title',
+          'university',
+          'researchAreas',
+          'recentActivities',
+          'activitySummary',
+          'isActive',
+          'matchScore',
+          'alignmentDetails',
+          'matchReasoning',
+        ],
+      },
+    } as const;
+
+    const rawResults = await runPreferredWebSearchJson<Array<Partial<FacultyMember>>>(prompt, {
+      schemaName: 'faculty_web_search_results',
+      openAISchema,
+      geminiSchema,
+      parse: (text) => {
+        const parsed = parseJsonResponse<unknown>(text);
+        if (!Array.isArray(parsed)) {
+          throw new Error('Faculty web search returned invalid JSON.');
+        }
+        return parsed as Array<Partial<FacultyMember>>;
+      },
     });
 
-    const text = response.text;
-    if (!text) return [];
-    return JSON.parse(text) as FacultyMember[];
+    return normalizeFacultyResults(rawResults);
   } catch (error) {
     console.error("Web search for faculty failed:", error);
-    return [];
+    throw error;
   }
 };
 
 export const searchUniversityInfo = async (university: string, department?: string): Promise<any> => {
-  const ai = getClient();
   const prompt = `
     Task: Find detailed admission and program information for:
     University: ${university}
@@ -1668,26 +2239,113 @@ export const searchUniversityInfo = async (university: string, department?: stri
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: getGeminiSearchModel(),
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: 'application/json',
-        tools: [{ googleSearch: {} }]
-      }
+    type UniversitySearchResult = {
+      university?: string;
+      qsRanking?: string;
+      website?: string;
+      tuition?: { value?: string; sourceUrl?: string };
+      deadline?: { value?: string; sourceUrl?: string };
+      requirements?: { value?: string; sourceUrl?: string };
+      scholarships?: { value?: string; sourceUrl?: string };
+      programs?: string[];
+    };
+
+    const geminiSourceSchema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        value: { type: Type.STRING },
+        sourceUrl: { type: Type.STRING },
+      },
+      required: ['value', 'sourceUrl'],
+    };
+
+    const geminiSchema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        university: { type: Type.STRING },
+        qsRanking: { type: Type.STRING },
+        website: { type: Type.STRING },
+        tuition: geminiSourceSchema,
+        deadline: geminiSourceSchema,
+        requirements: geminiSourceSchema,
+        scholarships: geminiSourceSchema,
+        programs: { type: Type.ARRAY, items: { type: Type.STRING } },
+      },
+      required: ['university', 'qsRanking', 'website', 'tuition', 'deadline', 'requirements', 'scholarships', 'programs'],
+    };
+
+    const openAISourceSchema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        value: { type: 'string' },
+        sourceUrl: { type: 'string' },
+      },
+      required: ['value', 'sourceUrl'],
+    } as const;
+
+    const openAISchema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        university: { type: 'string' },
+        qsRanking: { type: 'string' },
+        website: { type: 'string' },
+        tuition: openAISourceSchema,
+        deadline: openAISourceSchema,
+        requirements: openAISourceSchema,
+        scholarships: openAISourceSchema,
+        programs: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['university', 'qsRanking', 'website', 'tuition', 'deadline', 'requirements', 'scholarships', 'programs'],
+    } as const;
+
+    const rawResult = await runPreferredWebSearchJson<UniversitySearchResult>(prompt, {
+      schemaName: 'university_info_search_result',
+      openAISchema,
+      geminiSchema,
+      parse: (text) => {
+        const parsed = parseJsonResponse<unknown>(text);
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+          throw new Error('University info search returned invalid JSON.');
+        }
+        return parsed as UniversitySearchResult;
+      },
     });
 
-    const text = response.text;
-    if (!text) return null;
-    return JSON.parse(text);
+    const normalized = {
+      university: rawResult.university?.trim() || university,
+      qsRanking: rawResult.qsRanking?.trim() || EMPTY_OFFICIAL_SOURCE_VALUES[0],
+      website: sanitizeHttpUrl(rawResult.website, { allowRoot: true }),
+      tuition: normalizeSourceData(rawResult.tuition),
+      deadline: normalizeSourceData(rawResult.deadline),
+      requirements: normalizeSourceData(rawResult.requirements),
+      scholarships: normalizeSourceData(rawResult.scholarships),
+      programs: Array.isArray(rawResult.programs)
+        ? rawResult.programs.map((item) => item?.trim()).filter(Boolean)
+        : [],
+    };
+
+    if (
+      !hasMeaningfulSourceValue(normalized.qsRanking) &&
+      !normalized.website &&
+      !hasMeaningfulSourceValue(normalized.tuition.value) &&
+      !hasMeaningfulSourceValue(normalized.deadline.value) &&
+      !hasMeaningfulSourceValue(normalized.requirements.value) &&
+      !hasMeaningfulSourceValue(normalized.scholarships.value) &&
+      normalized.programs.length === 0
+    ) {
+      return null;
+    }
+
+    return normalized;
   } catch (error) {
     console.error("University search failed:", error);
-    return null;
+    throw error;
   }
 };
 
 export const refreshFacultyData = async (existing: FacultyMember): Promise<FacultyMember> => {
-  const ai = getClient();
   const currentYear = new Date().getFullYear();
   const prompt = `
     Task: Update and verify information for this faculty member:
@@ -1707,21 +2365,128 @@ export const refreshFacultyData = async (existing: FacultyMember): Promise<Facul
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: getGeminiSearchModel(),
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: 'application/json',
-        tools: [{ googleSearch: {} }]
-      }
+    const geminiSchema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING },
+        title: { type: Type.STRING },
+        university: { type: Type.STRING },
+        school: { type: Type.STRING },
+        department: { type: Type.STRING },
+        email: { type: Type.STRING },
+        profileUrl: { type: Type.STRING },
+        photoUrl: { type: Type.STRING },
+        researchAreas: { type: Type.ARRAY, items: { type: Type.STRING } },
+        recentActivities: { type: Type.ARRAY, items: { type: Type.STRING } },
+        activitySummary: { type: Type.STRING },
+        isActive: { type: Type.BOOLEAN },
+        alignmentDetails: { type: Type.STRING },
+        matchReasoning: {
+          type: Type.OBJECT,
+          properties: {
+            locationCheck: { type: Type.STRING },
+            universityCheck: { type: Type.STRING },
+            departmentCheck: { type: Type.STRING },
+            positionCheck: { type: Type.STRING },
+            activityCheck: { type: Type.STRING },
+            reputationCheck: { type: Type.STRING },
+            researchFit: { type: Type.STRING },
+          },
+          required: [
+            'locationCheck',
+            'universityCheck',
+            'departmentCheck',
+            'positionCheck',
+            'activityCheck',
+            'reputationCheck',
+            'researchFit',
+          ],
+        },
+      },
+      required: [
+        'name',
+        'title',
+        'university',
+        'researchAreas',
+        'recentActivities',
+        'activitySummary',
+        'isActive',
+        'alignmentDetails',
+        'matchReasoning',
+      ],
+    };
+
+    const openAISchema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        name: { type: 'string' },
+        title: { type: 'string' },
+        university: { type: 'string' },
+        school: { type: 'string' },
+        department: { type: 'string' },
+        email: { type: 'string' },
+        profileUrl: { type: 'string' },
+        photoUrl: { type: 'string' },
+        researchAreas: { type: 'array', items: { type: 'string' } },
+        recentActivities: { type: 'array', items: { type: 'string' } },
+        activitySummary: { type: 'string' },
+        isActive: { type: 'boolean' },
+        alignmentDetails: { type: 'string' },
+        matchReasoning: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            locationCheck: { type: 'string' },
+            universityCheck: { type: 'string' },
+            departmentCheck: { type: 'string' },
+            positionCheck: { type: 'string' },
+            activityCheck: { type: 'string' },
+            reputationCheck: { type: 'string' },
+            researchFit: { type: 'string' },
+          },
+          required: [
+            'locationCheck',
+            'universityCheck',
+            'departmentCheck',
+            'positionCheck',
+            'activityCheck',
+            'reputationCheck',
+            'researchFit',
+          ],
+        },
+      },
+      required: [
+        'name',
+        'title',
+        'university',
+        'researchAreas',
+        'recentActivities',
+        'activitySummary',
+        'isActive',
+        'alignmentDetails',
+        'matchReasoning',
+      ],
+    } as const;
+
+    const rawResult = await runPreferredWebSearchJson<Partial<FacultyMember>>(prompt, {
+      schemaName: 'faculty_refresh_result',
+      openAISchema,
+      geminiSchema,
+      allowedDomains: extractAllowedDomains(existing.profileUrl, existing.universityUrl),
+      parse: (text) => {
+        const parsed = parseJsonResponse<unknown>(text);
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+          throw new Error('Faculty refresh returned invalid JSON.');
+        }
+        return parsed as Partial<FacultyMember>;
+      },
     });
 
-    const text = response.text;
-    if (!text) return existing;
-    return JSON.parse(text) as FacultyMember;
+    return normalizeFacultyMember(rawResult, existing);
   } catch (error) {
     console.error("Faculty refresh failed:", error);
-    return existing;
+    throw error;
   }
 };
 

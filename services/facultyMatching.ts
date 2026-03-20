@@ -18,10 +18,112 @@ function normalizeText(value?: string | null): string {
     .trim();
 }
 
+const SEARCH_KEYWORD_STOPWORDS = new Set([
+  'student',
+  'profile',
+  'summary',
+  'background',
+  'research',
+  'interest',
+  'interests',
+  'experience',
+  'experiences',
+  'goal',
+  'goals',
+  'career',
+  'skills',
+  'quality',
+  'qualities',
+  'education',
+  'university',
+  'college',
+  'gpa',
+  'advisor',
+  'contact',
+  'current',
+  'provided',
+  'manual',
+  'note',
+  'notes',
+  '学生',
+  '画像',
+  '背景',
+  '摘要',
+  '兴趣',
+  '方向',
+  '经历',
+  '经验',
+  '当前',
+  '院校',
+  '目标',
+  '专业',
+  '学校',
+  '联系',
+  '顾问',
+  '申请',
+  '入学',
+  '年份',
+  '截止',
+  '时间',
+]);
+
+function extractSearchKeywords(...values: Array<string | undefined>): string[] {
+  const tokens = values
+    .flatMap((value) =>
+      String(value || '')
+        .split(/[\s,;|/，；、:：()[\]{}<>]+/)
+        .map((item) => normalizeText(item))
+        .filter(Boolean),
+    )
+    .filter((token) => token.length > 1)
+    .filter((token) => !SEARCH_KEYWORD_STOPWORDS.has(token))
+    .filter((token) => !/^\d+$/.test(token))
+    .filter((token) => !/^\d{2,4}(fall|spring|autumn|summer)?$/.test(token))
+    .filter((token) => !/^(20\d{2}|19\d{2})[-/.]?(0?[1-9]|1[0-2])?$/.test(token));
+
+  return Array.from(new Set(tokens)).slice(0, 12);
+}
+
+function buildSearchKeywords(filters: MatcherSearchFilters): string[] {
+  const directKeywords = extractSearchKeywords(
+    ...filters.targets.flatMap((target) => [target.department || '', target.major || '']),
+    filters.majorA || '',
+    filters.majorB || '',
+    filters.rpTopic || '',
+    filters.manualNotes || '',
+  );
+
+  if (directKeywords.length > 0) {
+    return directKeywords;
+  }
+
+  return extractSearchKeywords(filters.profileSummary || '');
+}
+
+function hasHardTargetConstraint(target: MatcherSearchTarget): boolean {
+  return Boolean(target.country || target.university || target.school);
+}
+
+function getActiveHardTargets(filters: MatcherSearchFilters): MatcherSearchTarget[] {
+  return filters.targets.filter((target) => hasHardTargetConstraint(target));
+}
+
+function hasStructuredSearchSignal(filters: MatcherSearchFilters): boolean {
+  return (
+    getActiveHardTargets(filters).length > 0 ||
+    buildSearchKeywords(filters).length > 0 ||
+    Boolean(filters.officialLinks.length)
+  );
+}
+
 function includesKeyword(text: string, keyword: string): boolean {
   const normalizedKeyword = normalizeText(keyword);
   if (!normalizedKeyword) return false;
   return text.includes(normalizedKeyword);
+}
+
+function countKeywordMatches(text: string, keywords: string[]): number {
+  return keywords.filter((keyword) => includesKeyword(text, keyword)).length;
 }
 
 function clampScore(score: number): number {
@@ -94,15 +196,39 @@ function buildFacultyCorpus(record: FacultyRecord | FacultyMember): string {
   );
 }
 
-function targetMatchesRecord(record: FacultyRecord, target: MatcherSearchTarget): boolean {
-  const corpus = buildFacultyCorpus(record);
+function facultyMatchesHardTarget(faculty: FacultyRecord | FacultyMember, target: MatcherSearchTarget): boolean {
+  const corpus = buildFacultyCorpus(faculty);
   const checks: boolean[] = [];
   if (target.country) checks.push(includesKeyword(corpus, target.country));
   if (target.university) checks.push(includesKeyword(corpus, target.university));
   if (target.school) checks.push(includesKeyword(corpus, target.school));
-  if (target.department) checks.push(includesKeyword(corpus, target.department));
-  if (target.major) checks.push(includesKeyword(corpus, target.major));
   return checks.length === 0 || checks.every(Boolean);
+}
+
+function countHardTargetMatches(faculty: FacultyRecord | FacultyMember, target: MatcherSearchTarget): number {
+  const corpus = buildFacultyCorpus(faculty);
+  let count = 0;
+  if (target.country && includesKeyword(corpus, target.country)) count += 1;
+  if (target.university && includesKeyword(corpus, target.university)) count += 1;
+  if (target.school && includesKeyword(corpus, target.school)) count += 1;
+  return count;
+}
+
+function getBestHardTargetMatchCount(
+  faculty: FacultyRecord | FacultyMember,
+  targets: MatcherSearchTarget[],
+): number {
+  if (targets.length === 0) return 0;
+
+  return targets.reduce((best, target) => {
+    if (!facultyMatchesHardTarget(faculty, target)) return best;
+    return Math.max(best, countHardTargetMatches(faculty, target));
+  }, 0);
+}
+
+function getRequestedResultCount(filters: MatcherSearchFilters): number {
+  const requested = filters.targets.reduce((sum, target) => sum + (target.count || 0), 0);
+  return Math.max(requested || filters.selectionCount || 5, 1);
 }
 
 function officialLinkBonus(faculty: FacultyRecord | FacultyMember, filters: MatcherSearchFilters): number {
@@ -140,16 +266,8 @@ export function evaluateMentorAgainstFilters(
 ): MentorEvaluationSnapshot {
   const corpus = buildFacultyCorpus(faculty);
   const reasons: string[] = [];
-
-  const keywords = splitMultiValue([
-    ...filters.targets.flatMap((target) => [target.department || '', target.major || '']),
-    filters.majorA || '',
-    filters.majorB || '',
-    filters.profileSummary || '',
-    filters.manualNotes || '',
-  ])
-    .filter((item) => item.length > 1)
-    .slice(0, 12);
+  const activeTargets = getActiveHardTargets(filters);
+  const keywords = buildSearchKeywords(filters);
 
   let researchFit = 0;
   if (filters.crossDiscipline && filters.majorA && filters.majorB) {
@@ -158,7 +276,7 @@ export function evaluateMentorAgainstFilters(
     researchFit = matchA && matchB ? 35 : matchA || matchB ? 18 : 0;
     reasons.push(matchA && matchB ? `同时覆盖 ${filters.majorA} 与 ${filters.majorB}` : '交叉学科覆盖仍需人工确认');
   } else if (keywords.length > 0) {
-    const matchedCount = keywords.filter((keyword) => includesKeyword(corpus, keyword)).length;
+    const matchedCount = countKeywordMatches(corpus, keywords);
     researchFit = Math.min(35, matchedCount * 8);
     if (matchedCount > 0) {
       reasons.push(`研究关键词命中 ${matchedCount} 项`);
@@ -166,21 +284,10 @@ export function evaluateMentorAgainstFilters(
   }
 
   let targetFit = 0;
-  const activeTargets = filters.targets.filter((target) =>
-    [target.country, target.university, target.school, target.department, target.major].some(Boolean),
-  );
-  if (activeTargets.length === 0) {
-    targetFit = 20;
-  } else {
-    const matchedTarget = activeTargets.find((target) =>
-      'id' in faculty
-        ? targetMatchesRecord(faculty as FacultyRecord, target)
-        : [target.country, target.university, target.school, target.department, target.major]
-            .filter(Boolean)
-            .every((value) => includesKeyword(corpus, String(value))),
-    );
+  if (activeTargets.length > 0) {
+    const matchedTarget = activeTargets.find((target) => facultyMatchesHardTarget(faculty, target));
     if (matchedTarget) {
-      targetFit = 25;
+      targetFit = 14 + countHardTargetMatches(faculty, matchedTarget) * 4;
       reasons.push('命中目标国家 / 学校 / 学院约束');
     }
   }
@@ -193,27 +300,26 @@ export function evaluateMentorAgainstFilters(
 
   let admissionFit = 0;
   if ('projects' in faculty) {
-    if (!filters.scholarshipRequirement || hasScholarship(faculty)) admissionFit += 8;
-    if (detectDegreeMatch(faculty, filters.degreeType)) admissionFit += 6;
+    if (filters.scholarshipRequirement && hasScholarship(faculty)) admissionFit += 8;
+    if (filters.degreeType && filters.degreeType !== 'unspecified' && detectDegreeMatch(faculty, filters.degreeType)) {
+      admissionFit += 6;
+    }
     const requirementText = faculty.projects
       .map((project) => `${project.applicationRequirementsRaw || ''} ${project.rpRequirementsRaw || ''}`)
       .join(' ');
-    if (filters.profileSummary && includesKeyword(normalizeText(requirementText), normalizeText(filters.profileSummary).slice(0, 30))) {
-      admissionFit += 6;
+    const requirementMatches = countKeywordMatches(normalizeText(requirementText), keywords);
+    if (requirementMatches > 0) {
+      admissionFit += Math.min(6, requirementMatches * 2);
     }
-  } else {
-    admissionFit = detectDegreeMatch(faculty, filters.degreeType) ? 10 : 0;
+  } else if (filters.degreeType && filters.degreeType !== 'unspecified' && detectDegreeMatch(faculty, filters.degreeType)) {
+    admissionFit = 6;
   }
 
   let seniorityFit = 0;
   const title = normalizeText(faculty.title);
-  if (!filters.targetPosition) {
-    seniorityFit += 6;
-  } else if (includesKeyword(title, filters.targetPosition)) {
+  if (filters.targetPosition && includesKeyword(title, filters.targetPosition)) {
     seniorityFit += 10;
     reasons.push('导师职级符合要求');
-  } else if (includesKeyword(title, 'professor') || includesKeyword(title, '教授')) {
-    seniorityFit += 6;
   }
   if (faculty.isActive) seniorityFit += 2;
   if ((faculty.recentActivities || []).length > 0) seniorityFit += 2;
@@ -258,24 +364,31 @@ function recordContainsExcludedText(record: FacultyRecord, exclusions: string[])
 
 export function getLocalFacultyMatches(facultyDatabase: FacultyRecord[], filters: MatcherSearchFilters): FacultyRecord[] {
   const exclusions = splitMultiValue(filters.exclusions);
+  const hasSignal = hasStructuredSearchSignal(filters);
+  const keywords = buildSearchKeywords(filters);
+  const activeTargets = getActiveHardTargets(filters);
+  const requestedCount = getRequestedResultCount(filters);
+  const hasLinkSignal = filters.officialLinks.length > 0;
+
+  if (!hasSignal) {
+    return [];
+  }
 
   return facultyDatabase
     .filter((record) => !recordContainsExcludedText(record, exclusions))
     .filter((record) => detectDegreeMatch(record, filters.degreeType))
-    .filter((record) => {
-      const targets = filters.targets.filter((target) =>
-        [target.country, target.university, target.school, target.department, target.major].some(Boolean),
-      );
-      return targets.length === 0 || targets.some((target) => targetMatchesRecord(record, target));
-    })
     .map((record) => {
       const evaluation = evaluateMentorAgainstFilters(record, filters);
+      const keywordMatches = countKeywordMatches(buildFacultyCorpus(record), keywords);
+      const targetMatchCount = getBestHardTargetMatchCount(record, activeTargets);
       return {
         ...record,
         matchScore: evaluation.score,
         alignmentDetails: evaluation.summary,
         evaluation,
         matchSource: 'local' as MatchSource,
+        keywordMatches,
+        targetMatchCount,
         evidenceUrls: Array.from(
           new Set(
             [
@@ -294,7 +407,21 @@ export function getLocalFacultyMatches(facultyDatabase: FacultyRecord[], filters
         ),
       };
     })
-    .sort((left, right) => right.matchScore - left.matchScore);
+    .filter((record) => {
+      const evaluation = record.evaluation;
+      if (!evaluation) return false;
+      if (activeTargets.length > 0 && record.targetMatchCount <= 0) return false;
+      if (keywords.length > 0 && record.keywordMatches <= 0) return false;
+      if (hasLinkSignal && evaluation.sourceBreakdown.targetFit <= 0) return false;
+      return true;
+    })
+    .sort((left, right) => {
+      if (right.keywordMatches !== left.keywordMatches) return right.keywordMatches - left.keywordMatches;
+      if (right.targetMatchCount !== left.targetMatchCount) return right.targetMatchCount - left.targetMatchCount;
+      return right.matchScore - left.matchScore;
+    })
+    .slice(0, requestedCount)
+    .map(({ keywordMatches: _keywordMatches, targetMatchCount: _targetMatchCount, ...record }) => record);
 }
 
 export function mergeLocalAndWebMatches(
@@ -303,11 +430,29 @@ export function mergeLocalAndWebMatches(
   filters: MatcherSearchFilters,
 ): { local: FacultyRecord[]; web: FacultyMember[] } {
   const localMap = new Map(localMatches.map((record) => [normalizeFacultyIdentity(record.name, record.university), record]));
-  const mergedWeb: FacultyMember[] = [];
+  const mergedWeb: Array<FacultyMember & { keywordMatches: number; targetMatchCount: number }> = [];
+  const activeTargets = getActiveHardTargets(filters);
+  const keywords = buildSearchKeywords(filters);
+  const hasLinkSignal = filters.officialLinks.length > 0;
+  const remainingCount = Math.max(getRequestedResultCount(filters) - localMatches.length, 0);
 
   webMatches.forEach((faculty) => {
     const evaluation = evaluateMentorAgainstFilters(faculty, filters);
     const duplicateLocal = localMap.get(normalizeFacultyIdentity(faculty.name, faculty.university));
+    const keywordMatches = countKeywordMatches(buildFacultyCorpus(faculty), keywords);
+    const targetMatchCount = getBestHardTargetMatchCount(faculty, activeTargets);
+
+    if (activeTargets.length > 0 && targetMatchCount <= 0) {
+      return;
+    }
+
+    if (keywords.length > 0 && keywordMatches <= 0) {
+      return;
+    }
+
+    if (hasLinkSignal && evaluation.sourceBreakdown.targetFit <= 0) {
+      return;
+    }
 
     if (duplicateLocal) {
       duplicateLocal.matchSource = 'merged';
@@ -322,13 +467,22 @@ export function mergeLocalAndWebMatches(
       alignmentDetails: evaluation.summary,
       evaluation,
       matchSource: 'web',
+      keywordMatches,
+      targetMatchCount,
       evidenceUrls: Array.from(new Set([...(faculty.evidenceUrls || []), faculty.profileUrl || '', faculty.universityUrl || ''].filter(Boolean))),
     });
   });
 
   return {
     local: localMatches,
-    web: mergedWeb.sort((left, right) => right.matchScore - left.matchScore),
+    web: mergedWeb
+      .sort((left, right) => {
+        if (right.keywordMatches !== left.keywordMatches) return right.keywordMatches - left.keywordMatches;
+        if (right.targetMatchCount !== left.targetMatchCount) return right.targetMatchCount - left.targetMatchCount;
+        return right.matchScore - left.matchScore;
+      })
+      .slice(0, remainingCount)
+      .map(({ keywordMatches: _keywordMatches, targetMatchCount: _targetMatchCount, ...faculty }) => faculty),
   };
 }
 
