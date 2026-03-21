@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FacultyMember, FacultyRecord, SourceData, DeadlineRound } from '../types';
+import { FacultyMember, FacultyRecord, SourceData } from '../types';
 import { searchUniversityInfo } from '../services/geminiService';
 import { 
   Award, 
@@ -25,6 +25,360 @@ import {
   Database,
   Sparkles
 } from 'lucide-react';
+
+const parseApplicationReqs = (text: string) => {
+    if (!text) return null;
+    
+    const extractUrls = (block: string) => Array.from(new Set(block.match(/(https?:\/\/[^\s]+)/g) || []));
+    const cleanText = (block: string) => block.replace(/(https?:\/\/[^\s]+)/g, '').replace(/^[\s\d、.:：,，]+/, '').trim();
+
+    // Find indices of sections
+    const sections = [
+        { key: 'lang', regex: /(?:\d+[\s、.：:]*)?(?:雅思|托福)/i },
+        { key: 'degree', regex: /(?:\d+[\s、.：:]*)?学位和成绩要求/i },
+        { key: 'gre', regex: /(?:\d+[\s、.：:]*)?GRE\s*&?\s*GMAT/i },
+        { key: 'materials', regex: /(?:\d+[\s、.：:]*)?具体申请材料/i },
+        { key: 'rp', regex: /(?:\d+[\s、.：:]*)?RP要求/i },
+        { key: 'deadline', regex: /(?:\d+[\s、.：:]*)?申请截止日期/i }
+    ];
+
+    let matches = sections.map(s => {
+        const match = text.match(s.regex);
+        return {
+            key: s.key,
+            index: match ? match.index : -1,
+            length: match ? match[0].length : 0
+        };
+    }).filter(m => m.index !== -1).sort((a, b) => a.index! - b.index!);
+
+    const blocks: Record<string, string> = {};
+    
+    for (let i = 0; i < matches.length; i++) {
+        const current = matches[i];
+        const next = matches[i + 1];
+        const start = current.index! + current.length;
+        const end = next ? next.index! : text.length;
+        blocks[current.key] = text.substring(start, end);
+    }
+
+    // 1. Language
+    const langBlock = blocks['lang'] || '';
+    const langUrls = extractUrls(langBlock);
+
+    // Also search the whole text for IELTS and TOEFL just in case they are not in the lang block
+    const ieltsRegex = /雅思.*?总分[：:\s]*([\d.]+).*?阅读[：:\s]*([\d.]+).*?听力[：:\s]*([\d.]+).*?口语[：:\s]*([\d.]+).*?写作[：:\s]*([\d.]+)/i;
+    const ieltsMatch = text.match(ieltsRegex);
+    const ielts = ieltsMatch ? {
+        total: ieltsMatch[1],
+        reading: ieltsMatch[2],
+        listening: ieltsMatch[3],
+        speaking: ieltsMatch[4],
+        writing: ieltsMatch[5]
+    } : null;
+
+    const toeflRegex = /托福.*?总分[：:\s]*([\d.]+).*?听力[：:\s]*([\d.]+).*?口语[：:\s]*([\d.]+).*?阅读[：:\s]*([\d.]+).*?写作[：:\s]*([\d.]+)/i;
+    const toeflMatch = text.match(toeflRegex);
+    const toefl = toeflMatch ? {
+        total: toeflMatch[1],
+        listening: toeflMatch[2],
+        speaking: toeflMatch[3],
+        reading: toeflMatch[4],
+        writing: toeflMatch[5]
+    } : null;
+
+    // 2. Degree
+    const degreeBlock = blocks['degree'];
+    const degreeUrls = degreeBlock ? extractUrls(degreeBlock) : [];
+    const degree = degreeBlock ? {
+        text: cleanText(degreeBlock),
+        urls: degreeUrls
+    } : null;
+
+    // 3. GRE/GMAT
+    const greBlock = blocks['gre'];
+    const greUrls = greBlock ? extractUrls(greBlock) : [];
+    const gre = greBlock ? {
+        text: cleanText(greBlock),
+        urls: greUrls
+    } : null;
+
+    // 4. Materials
+    const materialsBlock = blocks['materials'];
+    const materialsUrls = materialsBlock ? extractUrls(materialsBlock) : [];
+    const materials = materialsBlock ? {
+        text: cleanText(materialsBlock),
+        urls: materialsUrls
+    } : null;
+
+    // 5. RP
+    const rpBlock = blocks['rp'];
+    const rpUrls = rpBlock ? extractUrls(rpBlock) : [];
+    const rp = rpBlock ? {
+        text: cleanText(rpBlock),
+        urls: rpUrls
+    } : null;
+
+    // 6. Deadline
+    const deadlineBlock = blocks['deadline'];
+    const deadlineUrls = deadlineBlock ? extractUrls(deadlineBlock) : [];
+    const deadline = deadlineBlock ? {
+        text: cleanText(deadlineBlock),
+        urls: deadlineUrls
+    } : null;
+
+    // Global URLs (any URL not captured in the blocks)
+    const allUrls = extractUrls(text);
+    const usedUrls = new Set([...langUrls, ...degreeUrls, ...greUrls, ...materialsUrls, ...rpUrls, ...deadlineUrls]);
+    const remainingUrls = allUrls.filter(url => !usedUrls.has(url));
+
+    return { ielts, toefl, langUrls, degree, gre, materials, rp, deadline, remainingUrls };
+};
+
+const renderInlineUrls = (urls: string[]) => {
+    if (!urls || urls.length === 0) return null;
+    return (
+        <div className="flex gap-2 flex-wrap ml-auto">
+            {urls.map((url, index) => (
+                <a
+                    key={index}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-blue-100 text-blue-500 text-[10px] font-bold hover:bg-blue-50 transition-colors"
+                    title={url}
+                >
+                    <ExternalLink size={12} />
+                    来源 {index + 1}
+                </a>
+            ))}
+        </div>
+    );
+};
+
+const StructuredReqsCard = ({ title, content, defaultUrls = [] }: { title: string, content: string, defaultUrls?: string[] }) => {
+    if (!content) return null;
+
+    const parsed = parseApplicationReqs(content);
+    
+    // If we can't parse structured data, just show text
+    const hasStructuredData = parsed?.ielts || parsed?.toefl || parsed?.degree || parsed?.gre || parsed?.materials || parsed?.rp || parsed?.deadline;
+
+    const topUrls = Array.from(new Set([...defaultUrls, ...(parsed?.remainingUrls || [])]));
+
+    return (
+        <div className="bg-white rounded-[24px] p-6 shadow-sm border border-gray-100">
+            <div className="flex justify-between items-start mb-6">
+                <h3 className="text-[11px] font-black text-gray-500 uppercase tracking-widest">{title}</h3>
+                {topUrls.length > 0 && (
+                    <div className="flex gap-2 flex-wrap justify-end">
+                        {topUrls.map((url, index) => (
+                            <a
+                                key={index}
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-blue-100 text-blue-500 text-[10px] font-bold hover:bg-blue-50 transition-colors"
+                            >
+                                <ExternalLink size={12} />
+                                来源 {index + 1}
+                            </a>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {hasStructuredData ? (
+                <div className="space-y-6">
+                    {(() => {
+                        let counter = 1;
+                        return (
+                            <>
+                                {(parsed.ielts || parsed.toefl) && (
+                                    <div className="bg-gray-50/50 rounded-2xl p-5 border border-gray-100">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-black">{counter++}</div>
+                                                <h4 className="text-sm font-black text-blue-600">语言成绩要求</h4>
+                                            </div>
+                                            {renderInlineUrls(parsed.langUrls)}
+                                        </div>
+                                        
+                                        <div className="space-y-4">
+                                            {parsed.ielts && (
+                                                <div>
+                                                    <div className="text-xs font-bold text-gray-500 mb-2">雅思总分：{parsed.ielts.total}</div>
+                                                    <div className="grid grid-cols-4 gap-4 bg-white rounded-xl p-4 border border-gray-100">
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-gray-400 mb-1">阅读</div>
+                                                            <div className="text-base font-black text-gray-900">{parsed.ielts.reading}</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-gray-400 mb-1">听力</div>
+                                                            <div className="text-base font-black text-gray-900">{parsed.ielts.listening}</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-gray-400 mb-1">口语</div>
+                                                            <div className="text-base font-black text-gray-900">{parsed.ielts.speaking}</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-gray-400 mb-1">写作</div>
+                                                            <div className="text-base font-black text-gray-900">{parsed.ielts.writing}</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {parsed.toefl && (
+                                                <div>
+                                                    <div className="text-xs font-bold text-gray-500 mb-2">托福总分：{parsed.toefl.total}</div>
+                                                    <div className="grid grid-cols-4 gap-4 bg-white rounded-xl p-4 border border-gray-100">
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-gray-400 mb-1">听力</div>
+                                                            <div className="text-base font-black text-gray-900">{parsed.toefl.listening}</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-gray-400 mb-1">口语</div>
+                                                            <div className="text-base font-black text-gray-900">{parsed.toefl.speaking}</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-gray-400 mb-1">阅读</div>
+                                                            <div className="text-base font-black text-gray-900">{parsed.toefl.reading}</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-gray-400 mb-1">写作</div>
+                                                            <div className="text-base font-black text-gray-900">{parsed.toefl.writing}</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {parsed.degree && (
+                                    <div className="bg-gray-50/50 rounded-2xl p-5 border border-gray-100">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-black">{counter++}</div>
+                                                <h4 className="text-sm font-black text-emerald-600">学位和成绩要求</h4>
+                                            </div>
+                                            {renderInlineUrls(parsed.degree.urls)}
+                                        </div>
+                                        <div className="text-sm font-bold text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                            {parsed.degree.text}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {parsed.gre && (
+                                    <div className="bg-gray-50/50 rounded-2xl p-5 border border-gray-100">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-6 h-6 rounded-full bg-purple-500 text-white flex items-center justify-center text-xs font-black">{counter++}</div>
+                                                <h4 className="text-sm font-black text-purple-600">GRE & GMAT</h4>
+                                            </div>
+                                            {renderInlineUrls(parsed.gre.urls)}
+                                        </div>
+                                        <div className="text-sm font-bold text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                            {parsed.gre.text}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {parsed.materials && (
+                                    <div className="bg-gray-50/50 rounded-2xl p-5 border border-gray-100">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-6 h-6 rounded-full bg-orange-500 text-white flex items-center justify-center text-xs font-black">{counter++}</div>
+                                                <h4 className="text-sm font-black text-orange-600">具体申请材料</h4>
+                                            </div>
+                                            {renderInlineUrls(parsed.materials.urls)}
+                                        </div>
+                                        <div className="text-sm font-bold text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                            {parsed.materials.text}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {parsed.rp && (
+                                    <div className="bg-gray-50/50 rounded-2xl p-5 border border-gray-100">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-6 h-6 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs font-black">{counter++}</div>
+                                                <h4 className="text-sm font-black text-rose-600">RP要求</h4>
+                                            </div>
+                                            {renderInlineUrls(parsed.rp.urls)}
+                                        </div>
+                                        <div className="text-sm font-bold text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                            {parsed.rp.text}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {parsed.deadline && (
+                                    <div className="bg-gray-50/50 rounded-2xl p-5 border border-gray-100">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-6 h-6 rounded-full bg-amber-500 text-white flex items-center justify-center text-xs font-black">{counter++}</div>
+                                                <h4 className="text-sm font-black text-amber-600">申请截止日期</h4>
+                                            </div>
+                                            {renderInlineUrls(parsed.deadline.urls)}
+                                        </div>
+                                        <div className="text-sm font-bold text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                            {parsed.deadline.text}
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        );
+                    })()}
+                </div>
+            ) : (
+                <div className="text-sm font-bold text-gray-700 leading-relaxed whitespace-pre-wrap">
+                    {content.replace(/(https?:\/\/[^\s]+)/g, '').trim()}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const InfoCard = ({ title, content, defaultUrls = [] }: { title: string, content: string, defaultUrls?: string[] }) => {
+    if (!content) return null;
+
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const extractedUrls = Array.from(new Set(content.match(urlRegex) || []));
+    const allUrls = Array.from(new Set([...defaultUrls, ...extractedUrls]));
+    const cleanContent = content.replace(urlRegex, '').trim();
+
+    return (
+        <div className="bg-white rounded-[24px] p-6 shadow-sm border border-gray-100">
+            <div className="flex justify-between items-start mb-6">
+                <h3 className="text-[11px] font-black text-gray-500 uppercase tracking-widest">{title}</h3>
+                {allUrls.length > 0 && (
+                    <div className="flex gap-2 flex-wrap justify-end">
+                        {allUrls.map((url, index) => (
+                            <a
+                                key={index}
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-blue-100 text-blue-500 text-[10px] font-bold hover:bg-blue-50 transition-colors"
+                            >
+                                <ExternalLink size={12} />
+                                来源 {index + 1}
+                            </a>
+                        ))}
+                    </div>
+                )}
+            </div>
+            {cleanContent && (
+                <div className="text-sm font-bold text-gray-700 leading-relaxed whitespace-pre-wrap">
+                    {cleanContent}
+                </div>
+            )}
+        </div>
+    );
+};
 
 interface FacultyCardProps {
   prof: FacultyMember | FacultyRecord;
@@ -88,117 +442,6 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
         return { tags: match[1].trim(), content: match[2].trim() };
     }
     return { tags: '', content: text };
-  };
-
-  // Helper for rendering multi-source fields
-  const MultiSourceField = ({ label, data, colorClass }: { label: string, data?: SourceData | SourceData[], colorClass: string }) => {
-    const dataArray = Array.isArray(data) ? data : (data ? [data] : []);
-    if (dataArray.length === 0) return null;
-    return (
-      <div className="bg-white/60 p-5 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-        <div className={`text-[10px] font-black ${colorClass} uppercase tracking-[0.2em] mb-1 flex items-center gap-2`}>
-          <div className={`w-1.5 h-1.5 rounded-full ${colorClass.replace('text-', 'bg-')}`}></div>
-          {label}
-        </div>
-        <div className="space-y-4">
-          {dataArray.map((item, idx) => (
-            <div key={idx} className="group/source relative pl-4 border-l-2 border-gray-100 hover:border-blue-200 transition-colors">
-              <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 flex items-center justify-between">
-                <span>来源 {idx + 1}</span>
-                {item.sourceUrl && (
-                  <a href={item.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-600 flex items-center gap-1 transition-colors">
-                    <ExternalLink size={10} />
-                    查看原文
-                  </a>
-                )}
-              </div>
-              <div className="text-sm font-bold text-gray-800 leading-relaxed whitespace-pre-wrap">{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const LanguageScoreDisplay = ({ label, score }: { label: string, score?: any }) => {
-    if (!score || (!score.total && !score.reading && !score.listening && !score.speaking && !score.writing)) return null;
-    
-    const ScoreItem = ({ label, value, isTotal = false }: { label: string, value: string, isTotal?: boolean }) => (
-      <div className={`flex flex-col items-center p-3 rounded-2xl border transition-all ${
-        isTotal 
-          ? 'bg-indigo-50/50 border-indigo-100/50 shadow-sm' 
-          : 'bg-slate-50 border-slate-100 hover:bg-white hover:shadow-sm'
-      }`}>
-        <span className={`text-[9px] font-black uppercase tracking-tighter mb-1 ${
-          isTotal ? 'text-indigo-400' : 'text-slate-400'
-        }`}>{label}</span>
-        <span className={`${
-          isTotal ? 'text-base font-black text-indigo-700' : 'text-sm font-bold text-slate-700'
-        }`}>{value || '-'}</span>
-      </div>
-    );
-
-    return (
-      <div className="bg-white/80 p-5 rounded-3xl border border-indigo-100 shadow-sm hover:shadow-md transition-all">
-        <div className="flex items-center justify-between mb-4">
-          <div className="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
-            {label}
-          </div>
-          {score.sourceUrl && (
-            <a href={score.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline flex items-center gap-1">
-              <ExternalLink size={10} />
-              查看来源
-            </a>
-          )}
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <ScoreItem label="总分" value={score.total} isTotal />
-          <ScoreItem label="阅读" value={score.reading} />
-          <ScoreItem label="听力" value={score.listening} />
-          <ScoreItem label="口语" value={score.speaking} />
-          <ScoreItem label="写作" value={score.writing} />
-        </div>
-      </div>
-    );
-  };
-
-  const DeadlineTable = ({ rounds }: { rounds?: DeadlineRound[] }) => {
-    if (!rounds || rounds.length === 0) return null;
-    return (
-      <div className="bg-white/80 p-5 rounded-3xl border border-red-100 shadow-sm space-y-4">
-        <div className="text-[10px] font-black text-red-600 uppercase tracking-[0.2em] mb-1 flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
-          结构化申请轮次
-        </div>
-        <div className="overflow-hidden rounded-2xl border border-red-50">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-red-50/50">
-                <th className="px-4 py-2 text-[10px] font-black text-red-600 uppercase tracking-widest border-b border-red-100">轮次名称</th>
-                <th className="px-4 py-2 text-[10px] font-black text-red-600 uppercase tracking-widest border-b border-red-100">截止日期</th>
-                <th className="px-4 py-2 text-[10px] font-black text-red-600 uppercase tracking-widest border-b border-red-100 text-right">来源</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rounds.map((round, idx) => (
-                <tr key={idx} className="hover:bg-red-50/30 transition-colors">
-                  <td className="px-4 py-3 text-sm font-bold text-gray-800 border-b border-red-50">{round.roundName}</td>
-                  <td className="px-4 py-3 text-sm font-black text-red-700 border-b border-red-50">{round.date}</td>
-                  <td className="px-4 py-3 text-right border-b border-red-50">
-                    {round.sourceUrl && (
-                      <a href={round.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-600 transition-colors">
-                        <ExternalLink size={12} className="inline" />
-                      </a>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
   };
 
   const [imgError, setImgError] = React.useState(false);
@@ -476,7 +719,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                 {/* Research Areas Tags */}
                 <div className="mb-8">
                 <div className="flex flex-wrap gap-2.5">
-                {(prof.researchAreas || []).map((area, i) => (
+                {prof.researchAreas.map((area, i) => (
                     <span key={i} className="px-4 py-2 bg-gray-100/50 backdrop-blur-sm text-gray-600 text-[11px] font-bold rounded-xl border border-gray-200/50 hover:bg-white hover:shadow-md transition-all cursor-default">
                         {area}
                     </span>
@@ -523,73 +766,134 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
             </div>
         )}
 
-        {/* Admission & Funding Data Section */}
-        <div className="mb-10 space-y-6">
-          {/* Detailed Admission Requirements (Language Scores, etc.) */}
-          {prof.detailedRequirements && (
-            <div className="space-y-4">
-              <h6 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-indigo-500"></div> 
-                语言与学术要求
-              </h6>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <LanguageScoreDisplay label="IELTS 雅思" score={prof.detailedRequirements.ielts} />
-                <LanguageScoreDisplay label="TOEFL 托福" score={prof.detailedRequirements.toefl} />
-                
-                {prof.detailedRequirements.degreeAndGrades?.value && (
-                  <div className="bg-white/80 p-4 rounded-2xl border border-gray-100 shadow-sm col-span-full">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">学位与成绩要求</div>
-                      {prof.detailedRequirements.degreeAndGrades.sourceUrl && (
-                        <a href={prof.detailedRequirements.degreeAndGrades.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline">来源</a>
-                      )}
-                    </div>
-                    <div className="text-sm font-bold text-gray-800 leading-relaxed whitespace-pre-wrap">{prof.detailedRequirements.degreeAndGrades.value}</div>
-                  </div>
-                )}
-
-                {(prof.detailedRequirements.greGmat?.value || prof.detailedRequirements.otherMaterials?.value) && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 col-span-full">
-                    {prof.detailedRequirements.greGmat?.value && (
-                      <div className="bg-white/80 p-4 rounded-2xl border border-gray-100 shadow-sm">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">GRE / GMAT</div>
-                          {prof.detailedRequirements.greGmat.sourceUrl && (
-                            <a href={prof.detailedRequirements.greGmat.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline">来源</a>
-                          )}
+        {/* Projects List Section */}
+        {('projects' in prof) && prof.projects && prof.projects.length > 0 && (
+            <div className="mb-10">
+                <h5 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
+                    <Briefcase size={18} className="text-blue-500/30" />
+                    关联项目列表 ({prof.projects.length})
+                </h5>
+                <div className="space-y-4">
+                    {prof.projects.map((project, idx) => (
+                        <div key={idx} className="bg-white/60 backdrop-blur-sm p-6 rounded-3xl border border-white/50 shadow-sm hover:shadow-md transition-all group/project">
+                            <div className="flex flex-col md:flex-row justify-between items-start gap-4 mb-4">
+                                <div className="flex-1">
+                                    <div className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1">项目名称 / 专业</div>
+                                    <div className="text-base font-black text-gray-900 leading-tight">
+                                        {project.programNameEn}
+                                    </div>
+                                    {project.programUrl && (
+                                        <a href={project.programUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline mt-1 inline-flex items-center gap-1">
+                                            项目官网 <ExternalLink size={10} />
+                                        </a>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            <div className="space-y-4 mt-4">
+                                {project.deadline && (
+                                    <InfoCard 
+                                        title="申请截止日期" 
+                                        content={project.deadline} 
+                                    />
+                                )}
+                                {project.applicationReqs && (
+                                    <StructuredReqsCard 
+                                        title="申请要求及材料" 
+                                        content={project.applicationReqs} 
+                                    />
+                                )}
+                                {project.rpReqs && (
+                                    <InfoCard 
+                                        title="RP要求" 
+                                        content={project.rpReqs} 
+                                    />
+                                )}
+                                {project.tuition && (
+                                    <InfoCard 
+                                        title="学费" 
+                                        content={project.tuition} 
+                                    />
+                                )}
+                                {project.scholarship && (
+                                    <InfoCard 
+                                        title="奖学金" 
+                                        content={project.scholarship} 
+                                    />
+                                )}
+                            </div>
                         </div>
-                        <div className="text-sm font-bold text-gray-800 leading-relaxed">{prof.detailedRequirements.greGmat.value}</div>
-                      </div>
-                    )}
-                    {prof.detailedRequirements.otherMaterials?.value && (
-                      <div className="bg-white/80 p-4 rounded-2xl border border-gray-100 shadow-sm">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">其他申请材料</div>
-                          {prof.detailedRequirements.otherMaterials.sourceUrl && (
-                            <a href={prof.detailedRequirements.otherMaterials.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline">来源</a>
-                          )}
-                        </div>
-                        <div className="text-sm font-bold text-gray-800 leading-relaxed">{prof.detailedRequirements.otherMaterials.value}</div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+                    ))}
+                </div>
             </div>
+        )}
+
+        {/* Admission & Funding Data Section */}
+        <div className="mb-10">
+          {/* Display existing data if available */}
+          {(prof.qsRankingData || prof.deadlineData || prof.applicationReqsData || prof.rpReqsData || prof.tuitionData || prof.scholarshipData || prof.programName) && (
+             <div className="mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                    {prof.programName && (
+                        <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm col-span-full">
+                            <div className="text-[9px] font-black text-purple-600 uppercase tracking-widest mb-1">申请专业</div>
+                            <div className="text-sm font-bold text-gray-800">{prof.programName} {prof.programNameEn ? `(${prof.programNameEn})` : ''}</div>
+                            {prof.programUrl && <a href={prof.programUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">专业官网</a>}
+                        </div>
+                    )}
+                    {prof.qsRankingData?.value && (
+                        <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                            <div className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">QS World Ranking</div>
+                            <div className="text-sm font-bold text-gray-800">{prof.qsRankingData.value}</div>
+                            {prof.qsRankingData.sourceUrl && <a href={prof.qsRankingData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
+                        </div>
+                    )}
+                    {prof.rpReqsData?.value && (
+                        <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                            <div className="text-[9px] font-black text-pink-600 uppercase tracking-widest mb-1">RP要求</div>
+                            <div className="text-sm font-bold text-gray-800">{prof.rpReqsData.value}</div>
+                            {prof.rpReqsData.sourceUrl && <a href={prof.rpReqsData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
+                        </div>
+                    )}
+                </div>
+
+                <div className="space-y-6">
+                    {prof.deadlineData?.value && (
+                        <InfoCard 
+                            title="申请截止日期" 
+                            content={prof.deadlineData.value} 
+                            defaultUrls={prof.deadlineData.sourceUrl ? [prof.deadlineData.sourceUrl] : []} 
+                        />
+                    )}
+
+                    {prof.applicationReqsData?.value && (
+                        <StructuredReqsCard 
+                            title="申请要求及材料" 
+                            content={prof.applicationReqsData.value} 
+                            defaultUrls={prof.applicationReqsData.sourceUrl ? [prof.applicationReqsData.sourceUrl] : []} 
+                        />
+                    )}
+
+                    {prof.tuitionData?.value && (
+                        <InfoCard 
+                            title="学费" 
+                            content={prof.tuitionData.value} 
+                            defaultUrls={prof.tuitionData.sourceUrl ? [prof.tuitionData.sourceUrl] : []} 
+                        />
+                    )}
+
+                    {prof.scholarshipData?.value && (
+                        <InfoCard 
+                            title="奖学金项目" 
+                            content={prof.scholarshipData.value} 
+                            defaultUrls={prof.scholarshipData.sourceUrl ? [prof.scholarshipData.sourceUrl] : []} 
+                        />
+                    )}
+                </div>
+             </div>
           )}
 
-          {/* Multi-source Data Sections */}
-          <div className="grid grid-cols-1 gap-6">
-            <DeadlineTable rounds={prof.structuredDeadlines} />
-            <MultiSourceField label="申请截止日期 (原文)" data={prof.deadlineData as any} colorClass="text-red-600" />
-            <MultiSourceField label="申请要求及材料" data={prof.applicationReqsData as any} colorClass="text-indigo-600" />
-            <MultiSourceField label="RP 研究计划要求" data={prof.rpReqsData as any} colorClass="text-pink-600" />
-            <MultiSourceField label="学费信息" data={prof.tuitionData as any} colorClass="text-blue-600" />
-            <MultiSourceField label="奖学金与资助" data={prof.scholarshipData as any} colorClass="text-emerald-600" />
-          </div>
-
-          {/* Load Admission Data Button (if not already loaded) */}
-          {!admissionLoaded && !prof.detailedRequirements && (
+          {!admissionLoaded ? (
             <button onClick={handleLoadAdmission} disabled={loadingAdmission}
               className="w-full py-3.5 bg-gray-50/80 hover:bg-blue-50 border border-dashed border-gray-200 rounded-2xl text-sm font-bold text-gray-400 hover:text-blue-600 transition-all flex items-center justify-center gap-2 group">
               {loadingAdmission ? (
@@ -598,32 +902,53 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                 <><Search size={14} className="group-hover:scale-110 transition-transform" /> 点击加载招生数据（学费 / 奖学金 / DDL）</>
               )}
             </button>
-          )}
+          ) : admissionData ? (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {admissionData.qsRanking && admissionData.qsRanking !== '未找到官方数据' && (
+                  <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                    <div className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">QS World Ranking</div>
+                    <div className="text-sm font-bold text-gray-800">{admissionData.qsRanking}</div>
+                  </div>
+                )}
+              </div>
 
-          {/* On-demand loaded admission data display */}
-          {admissionLoaded && admissionData && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="h-px bg-gray-100 w-full my-8"></div>
-              <h6 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                <Sparkles size={14} />
-                实时搜索结果
-              </h6>
-              
-              {admissionData.detailedRequirements && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <LanguageScoreDisplay label="IELTS 雅思" score={admissionData.detailedRequirements.ielts} />
-                  <LanguageScoreDisplay label="TOEFL 托福" score={admissionData.detailedRequirements.toefl} />
-                </div>
-              )}
+              <div className="space-y-6">
+                  {admissionData.deadline?.value && admissionData.deadline.value !== '未找到官方数据' && (
+                    <InfoCard 
+                        title="申请截止日期" 
+                        content={admissionData.deadline.value} 
+                        defaultUrls={admissionData.deadline.sourceUrl ? [admissionData.deadline.sourceUrl] : []} 
+                    />
+                  )}
 
-              <div className="grid grid-cols-1 gap-6">
-                {admissionData.structuredDeadlines && <DeadlineTable rounds={admissionData.structuredDeadlines} />}
-                {admissionData.deadline && <MultiSourceField label="申请截止日期 (原文)" data={Array.isArray(admissionData.deadline) ? admissionData.deadline : [admissionData.deadline]} colorClass="text-red-600" />}
-                {admissionData.requirements && <MultiSourceField label="申请要求及材料" data={Array.isArray(admissionData.requirements) ? admissionData.requirements : [admissionData.requirements]} colorClass="text-indigo-600" />}
-                {admissionData.tuition && <MultiSourceField label="学费信息" data={Array.isArray(admissionData.tuition) ? admissionData.tuition : [admissionData.tuition]} colorClass="text-blue-600" />}
-                {admissionData.scholarships && <MultiSourceField label="奖学金与资助" data={Array.isArray(admissionData.scholarships) ? admissionData.scholarships : [admissionData.scholarships]} colorClass="text-emerald-600" />}
+                  {admissionData.requirements?.value && admissionData.requirements.value !== '未找到官方数据' && (
+                    <StructuredReqsCard 
+                        title="申请要求及材料" 
+                        content={admissionData.requirements.value} 
+                        defaultUrls={admissionData.requirements.sourceUrl ? [admissionData.requirements.sourceUrl] : []} 
+                    />
+                  )}
+
+                  {admissionData.tuition?.value && admissionData.tuition.value !== '未找到官方数据' && (
+                    <InfoCard 
+                        title="学费" 
+                        content={admissionData.tuition.value} 
+                        defaultUrls={admissionData.tuition.sourceUrl ? [admissionData.tuition.sourceUrl] : []} 
+                    />
+                  )}
+
+                  {admissionData.scholarships?.value && admissionData.scholarships.value !== '未找到官方数据' && (
+                    <InfoCard 
+                        title="奖学金项目" 
+                        content={admissionData.scholarships.value} 
+                        defaultUrls={admissionData.scholarships.sourceUrl ? [admissionData.scholarships.sourceUrl] : []} 
+                    />
+                  )}
               </div>
             </div>
+          ) : (
+            <div className="text-center text-sm text-gray-400 py-4 bg-gray-50 rounded-2xl">暂未查询到招生数据</div>
           )}
         </div>
 
@@ -731,7 +1056,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                 {prof.recentActivities && prof.recentActivities.length > 0 && (
                     <div className="max-h-[500px] overflow-y-auto pr-4 custom-scrollbar">
                         <div className="space-y-0 relative border-l-2 border-gray-100/50 ml-3 pt-2 pb-2">
-                            {(prof.recentActivities || []).map((activity, i) => {
+                            {prof.recentActivities.map((activity, i) => {
                                 const parsed = parseActivity(activity);
                                 return (
                                     <div key={i} className="mb-6 ml-8 relative group/item">
@@ -763,12 +1088,12 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                             </div>
                             <div>
                                 <div className="text-[10px] font-black text-white/60 uppercase tracking-widest mb-1">Next Application Deadline</div>
-                                <div className="text-lg font-black text-white leading-none">{prof.deadlineData[0]?.value || 'N/A'}</div>
+                                <div className="text-lg font-black text-white leading-none">{prof.deadlineData.value}</div>
                             </div>
                         </div>
-                        {prof.deadlineData[0]?.sourceUrl && (
+                        {prof.deadlineData.sourceUrl && (
                             <a 
-                                href={prof.deadlineData[0].sourceUrl} 
+                                href={prof.deadlineData.sourceUrl} 
                                 target="_blank" 
                                 rel="noopener noreferrer"
                                 className="px-4 py-2 bg-white/20 backdrop-blur-md text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/30 transition-all flex items-center gap-2"

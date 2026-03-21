@@ -2,17 +2,11 @@ import React, { useState } from 'react';
 import { X, Check, Trash2, AlertCircle } from 'lucide-react';
 import { FacultyMember, FacultyRecord } from '../types';
 
-interface ImportItem {
-  faculty: FacultyMember;
-  country: string;
-  fieldCategory: string;
-}
-
 interface FacultyImportPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (data: ImportItem[]) => void;
-  data: ImportItem[];
+  onConfirm: (data: FacultyRecord[]) => void;
+  data: FacultyRecord[];
   facultyDatabase: FacultyRecord[];
 }
 
@@ -23,7 +17,7 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
   data: initialData,
   facultyDatabase
 }) => {
-  const [items, setItems] = useState<ImportItem[]>(initialData);
+  const [items, setItems] = useState<FacultyRecord[]>(initialData);
 
   // Update items when initialData changes (if modal is reused)
   React.useEffect(() => {
@@ -38,15 +32,7 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
 
   const handleUpdate = (index: number, field: string, value: any) => {
     const newItems = [...items];
-    const newItem = { ...newItems[index] };
-    if (field === 'country') {
-      newItem.country = value;
-    } else if (field === 'fieldCategory') {
-      newItem.fieldCategory = value;
-    } else {
-      newItem.faculty = { ...newItem.faculty, [field]: value };
-    }
-    newItems[index] = newItem;
+    newItems[index] = { ...newItems[index], [field]: value };
     setItems(newItems);
   };
 
@@ -97,7 +83,7 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
                       <td className="px-4 py-3">
                         <input 
                           type="text" 
-                          value={item.faculty.name} 
+                          value={item.name} 
                           onChange={(e) => handleUpdate(index, 'name', e.target.value)}
                           className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm font-medium text-gray-900"
                         />
@@ -105,7 +91,7 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
                       <td className="px-4 py-3">
                         <input 
                           type="text" 
-                          value={item.faculty.university} 
+                          value={item.university} 
                           onChange={(e) => handleUpdate(index, 'university', e.target.value)}
                           className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm text-gray-600"
                         />
@@ -113,7 +99,7 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
                       <td className="px-4 py-3">
                         <input 
                           type="text" 
-                          value={item.faculty.qsRanking || ''} 
+                          value={item.qsRanking || ''} 
                           onChange={(e) => handleUpdate(index, 'qsRanking', e.target.value)}
                           className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm text-gray-600"
                         />
@@ -121,7 +107,7 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
                       <td className="px-4 py-3">
                         <input 
                           type="text" 
-                          value={item.faculty.title} 
+                          value={item.title} 
                           onChange={(e) => handleUpdate(index, 'title', e.target.value)}
                           className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm text-gray-600"
                         />
@@ -129,7 +115,7 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
                       <td className="px-4 py-3">
                         <input 
                           type="text" 
-                          value={item.faculty.programName || item.faculty.department || ''} 
+                          value={item.programName || item.department || ''} 
                           onChange={(e) => handleUpdate(index, 'programName', e.target.value)}
                           className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm text-gray-600"
                         />
@@ -137,17 +123,8 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
                       <td className="px-4 py-3">
                         <input 
                           type="text" 
-                          value={Array.isArray(item.faculty.deadlineData) ? (item.faculty.deadlineData[0]?.value || '') : (item.faculty.deadlineData as any)?.value || ''} 
-                          onChange={(e) => {
-                            const newValue = e.target.value;
-                            const currentData = Array.isArray(item.faculty.deadlineData) ? [...item.faculty.deadlineData] : [];
-                            if (currentData.length > 0) {
-                              currentData[0] = { ...currentData[0], value: newValue };
-                            } else {
-                              currentData.push({ value: newValue, sourceUrl: '' });
-                            }
-                            handleUpdate(index, 'deadlineData', currentData);
-                          }}
+                          value={item.deadlineData?.value || ''} 
+                          onChange={(e) => handleUpdate(index, 'deadlineData', { ...item.deadlineData, value: e.target.value })}
                           className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm text-gray-600"
                         />
                       </td>
@@ -170,7 +147,7 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
                       <td className="px-4 py-3">
                         <input 
                           type="text" 
-                          value={item.faculty.email} 
+                          value={item.email} 
                           onChange={(e) => handleUpdate(index, 'email', e.target.value)}
                           className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm text-gray-600"
                         />

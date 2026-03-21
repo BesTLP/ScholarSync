@@ -6,7 +6,9 @@ import FacultyManualEntryModal from './FacultyManualEntryModal';
 import BatchClassifyModal from './BatchClassifyModal';
 import FacultyImportPreviewModal from './FacultyImportPreviewModal';
 import FacultyConflictModal from './FacultyConflictModal';
-import { refreshFacultyData, processImportedFacultyRow, processImportedFacultyBatch } from '../services/geminiService';
+import XlsxImportModal from './XlsxImportModal';
+import { importFacultyFromXlsx } from '../services/facultyImportService';
+import { refreshFacultyData, processImportedFacultyBatch, processImportedFacultyRow } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import { 
   Search, 
@@ -31,21 +33,23 @@ import {
 interface FacultyDatabaseProps {
   facultyDatabase: FacultyRecord[];
   clients: Client[];
-  onAddFaculty: (faculty: FacultyMember, country: string, fieldCategory: string, extra?: Partial<FacultyRecord>) => string;
-  onBatchAddFaculty?: (items: { faculty: FacultyMember, country?: string, fieldCategory?: string, extra?: Partial<FacultyRecord> }[]) => void;
+  onAddFaculty: (faculty: FacultyMember, manualCountry?: string, manualField?: string, extra?: Partial<FacultyRecord>) => string;
+  onBatchAddFaculty?: (items: FacultyRecord[]) => void;
+  onImportFacultyRecords?: (records: FacultyRecord[]) => { createdFacultyCount: number, mergedFacultyCount: number, appendedProjectCount: number };
   onUpdateFaculty: (id: string, updates: Partial<FacultyRecord>) => void;
-  onBatchUpdateFaculty: (ids: string[], updates: Partial<FacultyRecord>) => void;
+  onBatchUpdateFaculty?: (ids: string[], updates: Partial<FacultyRecord>) => void;
   onDeleteFaculty: (id: string) => void;
-  onLinkFaculty: (facultyId: string, clientId: string) => void;
-  onUnlinkFaculty: (facultyId: string, clientId: string) => void;
+  onLinkFaculty: (clientId: string, facultyId: string) => void;
+  onUnlinkFaculty: (clientId: string, facultyId: string) => void;
 }
 
-const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
-  facultyDatabase,
-  clients,
-  onAddFaculty,
+const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({ 
+  facultyDatabase, 
+  clients, 
+  onAddFaculty, 
   onBatchAddFaculty,
-  onUpdateFaculty,
+  onImportFacultyRecords,
+  onUpdateFaculty, 
   onBatchUpdateFaculty,
   onDeleteFaculty,
   onLinkFaculty,
@@ -54,8 +58,10 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCountry, setSelectedCountry] = useState<string>('all');
-  const [selectedSubRegion, setSelectedSubRegion] = useState<string>('all');
+  const [selectedProvinceState, setSelectedProvinceState] = useState<string>('all');
+  const [selectedCity, setSelectedCity] = useState<string>('all');
   const [selectedUniversity, setSelectedUniversity] = useState<string>('all');
+  const [selectedSchool, setSelectedSchool] = useState<string>('all');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
   const [selectedField, setSelectedField] = useState<string>('all');
   const [selectedSubField, setSelectedSubField] = useState<string>('all');
@@ -63,38 +69,56 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isManualEntryModalOpen, setIsManualEntryModalOpen] = useState(false);
+  const [isXlsxImportModalOpen, setIsXlsxImportModalOpen] = useState(false);
   const [isBatchClassifyModalOpen, setIsBatchClassifyModalOpen] = useState(false);
   const [linkingFacultyId, setLinkingFacultyId] = useState<string | null>(null);
   const [editingFaculty, setEditingFaculty] = useState<FacultyRecord | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
-  const [importPreviewData, setImportPreviewData] = useState<{ faculty: FacultyMember, country: string, fieldCategory: string }[]>([]);
+  const [importPreviewData, setImportPreviewData] = useState<FacultyRecord[]>([]);
   const [conflicts, setConflicts] = useState<any[]>([]);
   const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
   const [isImportPreviewOpen, setIsImportPreviewOpen] = useState(false);
   const [isBatchDeleteModalOpen, setIsBatchDeleteModalOpen] = useState(false);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
-  // Derived Data for Filters
+  // Derived Data for Filters (Hierarchical)
   const countries = useMemo(() => Array.from(new Set(facultyDatabase.map(f => f.country))).filter(Boolean).sort(), [facultyDatabase]);
-  const subRegions = useMemo(() => {
+  
+  const provinceStates = useMemo(() => {
     const relevant = selectedCountry === 'all' ? facultyDatabase : facultyDatabase.filter(f => f.country === selectedCountry);
-    return Array.from(new Set(relevant.map(f => f.subRegion).filter(Boolean) as string[])).sort();
+    return Array.from(new Set(relevant.map(f => f.provinceState).filter(Boolean) as string[])).sort();
   }, [facultyDatabase, selectedCountry]);
+
+  const cities = useMemo(() => {
+    let relevant = facultyDatabase;
+    if (selectedCountry !== 'all') relevant = relevant.filter(f => f.country === selectedCountry);
+    if (selectedProvinceState !== 'all') relevant = relevant.filter(f => f.provinceState === selectedProvinceState);
+    return Array.from(new Set(relevant.map(f => f.city).filter(Boolean) as string[])).sort();
+  }, [facultyDatabase, selectedCountry, selectedProvinceState]);
+
   const universities = useMemo(() => {
     let relevant = facultyDatabase;
     if (selectedCountry !== 'all') relevant = relevant.filter(f => f.country === selectedCountry);
-    if (selectedSubRegion !== 'all') relevant = relevant.filter(f => f.subRegion === selectedSubRegion);
+    if (selectedProvinceState !== 'all') relevant = relevant.filter(f => f.provinceState === selectedProvinceState);
+    if (selectedCity !== 'all') relevant = relevant.filter(f => f.city === selectedCity);
     return Array.from(new Set(relevant.map(f => f.university))).filter(Boolean).sort();
-  }, [facultyDatabase, selectedCountry, selectedSubRegion]);
+  }, [facultyDatabase, selectedCountry, selectedProvinceState, selectedCity]);
+
+  const schools = useMemo(() => {
+    let relevant = facultyDatabase;
+    if (selectedUniversity !== 'all') relevant = relevant.filter(f => f.university === selectedUniversity);
+    return Array.from(new Set(relevant.map(f => f.school).filter(Boolean) as string[])).sort();
+  }, [facultyDatabase, selectedUniversity]);
+
   const departments = useMemo(() => {
     let relevant = facultyDatabase;
-    if (selectedCountry !== 'all') relevant = relevant.filter(f => f.country === selectedCountry);
-    if (selectedSubRegion !== 'all') relevant = relevant.filter(f => f.subRegion === selectedSubRegion);
     if (selectedUniversity !== 'all') relevant = relevant.filter(f => f.university === selectedUniversity);
+    if (selectedSchool !== 'all') relevant = relevant.filter(f => f.school === selectedSchool);
     return Array.from(new Set(relevant.map(f => f.department))).filter(Boolean).sort();
-  }, [facultyDatabase, selectedCountry, selectedSubRegion, selectedUniversity]);
+  }, [facultyDatabase, selectedUniversity, selectedSchool]);
+
   const fields = useMemo(() => Array.from(new Set(facultyDatabase.map(f => f.fieldCategory))).filter(Boolean).sort(), [facultyDatabase]);
   const subFields = useMemo(() => {
     const relevant = selectedField === 'all' ? facultyDatabase : facultyDatabase.filter(f => f.fieldCategory === selectedField);
@@ -110,8 +134,10 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
       .filter(f => {
         // Strict filters
         if (selectedCountry !== 'all' && f.country !== selectedCountry) return false;
-        if (selectedSubRegion !== 'all' && f.subRegion !== selectedSubRegion) return false;
+        if (selectedProvinceState !== 'all' && f.provinceState !== selectedProvinceState) return false;
+        if (selectedCity !== 'all' && f.city !== selectedCity) return false;
         if (selectedUniversity !== 'all' && f.university !== selectedUniversity) return false;
+        if (selectedSchool !== 'all' && f.school !== selectedSchool) return false;
         if (selectedDepartment !== 'all' && f.department !== selectedDepartment) return false;
         if (selectedField !== 'all' && f.fieldCategory !== selectedField) return false;
         if (selectedSubField !== 'all' && f.subFieldCategory !== selectedSubField) return false;
@@ -149,7 +175,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
         };
       })
       .sort((a, b) => (b.localMatchScore || 0) - (a.localMatchScore || 0));
-  }, [facultyDatabase, searchQuery, selectedCountry, selectedSubRegion, selectedUniversity, selectedDepartment, selectedField, selectedSubField, selectedTag]);
+  }, [facultyDatabase, searchQuery, selectedCountry, selectedProvinceState, selectedUniversity, selectedDepartment, selectedField, selectedSubField, selectedTag]);
 
   // Selection Handlers
   const toggleSelection = (id: string) => {
@@ -203,120 +229,50 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
     setIsImporting(true);
     setImportProgress({ current: 0, total: 0 });
 
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      try {
-        const arrayBuffer = evt.target?.result as ArrayBuffer;
-        const data = new Uint8Array(arrayBuffer);
-        const wb = XLSX.read(data, { type: 'array' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        const jsonData = XLSX.utils.sheet_to_json(ws);
-        
-        if (jsonData.length === 0) {
-          setAlertMessage("文件内容为空。");
-          setIsImporting(false);
-          return;
-        }
-
-        setImportProgress({ current: 0, total: jsonData.length });
-        
-        const previewItems: { faculty: FacultyMember, country: string, fieldCategory: string }[] = [];
-        const BATCH_SIZE = 5; // Reduced from 10 to avoid timeouts
-        
-        // Process in batches to balance speed and rate limits
-        for (let i = 0; i < jsonData.length; i += BATCH_SIZE) {
-          const batch = jsonData.slice(i, i + BATCH_SIZE);
-          setImportProgress({ current: i, total: jsonData.length });
-          
-          try {
-            const processedBatch = await processImportedFacultyBatch(batch);
-            if (processedBatch && processedBatch.length > 0) {
-              previewItems.push(...processedBatch);
-            } else if (batch.length > 0) {
-              // If batch returns empty but had items, try fallback
-              throw new Error("Batch returned empty result");
-            }
-          } catch (err) {
-            console.error(`Error processing batch starting at ${i}, falling back to row-by-row:`, err);
-            
-            // Fallback: process each row in the failed batch individually
-            for (let j = 0; j < batch.length; j++) {
-              const row = batch[j];
-              setImportProgress({ current: i + j, total: jsonData.length });
-              
-              // Add a small delay between row-by-row processing
-              await new Promise(resolve => setTimeout(resolve, 1000));
-              
-              try {
-                const processed = await processImportedFacultyRow(row);
-                if (processed && processed.faculty) {
-                  previewItems.push(processed);
-                }
-              } catch (rowErr) {
-                console.error(`Failed to process row ${i + j}:`, rowErr);
-              }
-            }
-          }
-        }
-        
-        setImportProgress({ current: jsonData.length, total: jsonData.length });
-        
-        if (previewItems.length > 0) {
-          setImportPreviewData(previewItems);
-          setIsImportPreviewOpen(true);
-        } else {
-          setAlertMessage("未识别到有效的导师信息，请检查文件格式或尝试手动录入。");
-        }
-      } catch (error) {
-        console.error("Error parsing file:", error);
-        setAlertMessage("文件解析失败，请确保格式正确。");
-      } finally {
-        setIsImporting(false);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
+    try {
+      const { records, summary } = await importFacultyFromXlsx(file);
+      
+      if (records.length === 0) {
+        setAlertMessage("未识别到有效的导师信息，请检查文件格式或尝试手动录入。");
+        return;
       }
-    };
-    reader.readAsArrayBuffer(file);
-  };
 
-  const handleConfirmImport = (items: { faculty: FacultyMember, country: string, fieldCategory: string }[]) => {
-    const newConflicts: any[] = [];
-    
-    items.forEach(item => {
-      const existing = facultyDatabase.find(f => f.name === item.faculty.name && f.university === item.faculty.university);
-      if (existing) {
-        const changes: any[] = [];
-        if (existing.department !== item.faculty.department) changes.push({ field: '部门', old: existing.department, new: item.faculty.department });
-        if (existing.title !== item.faculty.title) changes.push({ field: '职称', old: existing.title, new: item.faculty.title });
-        if (existing.email !== item.faculty.email) changes.push({ field: '邮箱', old: existing.email, new: item.faculty.email });
-        
-        if (changes.length > 0) {
-          newConflicts.push({ newItem: item, existingItem: existing, changes });
-        }
+      setImportPreviewData(records);
+      setIsImportPreviewOpen(true);
+    } catch (error) {
+      console.error("Error parsing file:", error);
+      setAlertMessage(error instanceof Error ? error.message : "文件解析失败，请确保格式正确。");
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
       }
-    });
-    
-    if (newConflicts.length > 0) {
-      setConflicts(newConflicts);
-      setIsConflictModalOpen(true);
-    } else {
-      performImport(items);
     }
   };
-  
-  const performImport = (items: { faculty: FacultyMember, country: string, fieldCategory: string }[]) => {
-    if (onBatchAddFaculty) {
-      onBatchAddFaculty(items.map(item => ({
-        faculty: item.faculty,
-        country: item.country || '',
-        fieldCategory: item.fieldCategory || '',
-        extra: { classificationSource: 'auto' }
-      })));
+
+  const handleConfirmImport = (items: FacultyRecord[]) => {
+    if (onImportFacultyRecords) {
+      const summary = onImportFacultyRecords(items);
+      setAlertMessage(`导入完成！新增 ${summary.createdFacultyCount} 位导师，合并 ${summary.mergedFacultyCount} 位导师，追加 ${summary.appendedProjectCount} 个项目。`);
+    } else if (onBatchAddFaculty) {
+      onBatchAddFaculty(items);
+      setAlertMessage(`成功导入 ${items.length} 位导师信息！`);
     } else {
       items.forEach(item => {
-        onAddFaculty(item.faculty, item.country || '', item.fieldCategory || '');
+        onAddFaculty(item as FacultyMember, item.country || '', item.fieldCategory || '', { ...item, classificationSource: 'import' });
+      });
+      setAlertMessage(`成功导入 ${items.length} 位导师信息！`);
+    }
+    setIsImportPreviewOpen(false);
+    setImportPreviewData([]);
+  };
+  
+  const performImport = (items: FacultyRecord[]) => {
+    if (onBatchAddFaculty) {
+      onBatchAddFaculty(items);
+    } else {
+      items.forEach(item => {
+        onAddFaculty(item as FacultyMember, item.country || '', item.fieldCategory || '', { ...item, classificationSource: 'import' });
       });
     }
     setIsImportPreviewOpen(false);
@@ -394,15 +350,19 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
         </div>
 
         <div className="p-4 space-y-6">
-          {/* Country Stats */}
+          {/* Geography Stats */}
           <div>
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">按国家/地区</h3>
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">地理层级</h3>
             <div className="space-y-1">
               <button 
-                onClick={() => { setSelectedCountry('all'); setSelectedSubRegion('all'); }}
+                onClick={() => { 
+                  setSelectedCountry('all'); 
+                  setSelectedProvinceState('all'); 
+                  setSelectedCity('all');
+                }}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedCountry === 'all' ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
               >
-                <span>全部</span>
+                <span>全部国家</span>
                 <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{facultyDatabase.length}</span>
               </button>
               {countries.map(country => {
@@ -411,25 +371,127 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                 return (
                   <div key={country} className="space-y-1">
                     <button 
-                      onClick={() => { setSelectedCountry(country); setSelectedSubRegion('all'); }}
+                      onClick={() => { 
+                        setSelectedCountry(country); 
+                        setSelectedProvinceState('all'); 
+                        setSelectedCity('all');
+                      }}
                       className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${isSelected ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
                     >
                       <span>{country}</span>
                       <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{count}</span>
                     </button>
-                    {isSelected && subRegions.length > 0 && (
+                    {isSelected && provinceStates.length > 0 && (
                       <div className="pl-4 space-y-1 animate-in slide-in-from-top-1 duration-200">
-                        {subRegions.map(sub => {
-                          const subCount = facultyDatabase.filter(f => f.country === country && f.subRegion === sub).length;
+                        {provinceStates.map(prov => {
+                          const provCount = facultyDatabase.filter(f => f.country === country && f.provinceState === prov).length;
+                          const isProvSelected = selectedProvinceState === prov;
                           return (
-                            <button
-                              key={sub}
-                              onClick={() => setSelectedSubRegion(sub)}
-                              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all ${selectedSubRegion === sub ? 'text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700 font-medium'}`}
-                            >
-                              <span>{sub}</span>
-                              <span>{subCount}</span>
-                            </button>
+                            <div key={prov} className="space-y-1">
+                              <button
+                                onClick={() => {
+                                  setSelectedProvinceState(prov);
+                                  setSelectedCity('all');
+                                }}
+                                className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-xs transition-all ${isProvSelected ? 'text-blue-600 font-bold bg-blue-50/30' : 'text-gray-500 hover:text-gray-700 font-medium'}`}
+                              >
+                                <span>{prov}</span>
+                                <span>{provCount}</span>
+                              </button>
+                              {isProvSelected && cities.length > 0 && (
+                                <div className="pl-4 space-y-1">
+                                  {cities.map(city => {
+                                    const cityCount = facultyDatabase.filter(f => f.country === country && f.provinceState === prov && f.city === city).length;
+                                    return (
+                                      <button
+                                        key={city}
+                                        onClick={() => setSelectedCity(city)}
+                                        className={`w-full flex items-center justify-between px-3 py-1 rounded-lg text-[10px] transition-all ${selectedCity === city ? 'text-blue-500 font-bold' : 'text-gray-400 hover:text-gray-600 font-medium'}`}
+                                      >
+                                        <span>{city}</span>
+                                        <span>{cityCount}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Organization Stats */}
+          <div>
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">组织层级</h3>
+            <div className="space-y-1">
+              <button 
+                onClick={() => { 
+                  setSelectedUniversity('all'); 
+                  setSelectedSchool('all'); 
+                  setSelectedDepartment('all');
+                }}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedUniversity === 'all' ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
+              >
+                <span>全部院校</span>
+                <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{facultyDatabase.length}</span>
+              </button>
+              {universities.map(uni => {
+                const count = facultyDatabase.filter(f => f.university === uni).length;
+                const isSelected = selectedUniversity === uni;
+                return (
+                  <div key={uni} className="space-y-1">
+                    <button 
+                      onClick={() => { 
+                        setSelectedUniversity(uni); 
+                        setSelectedSchool('all'); 
+                        setSelectedDepartment('all');
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${isSelected ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
+                    >
+                      <span className="truncate pr-2">{uni}</span>
+                      <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm flex-shrink-0">{count}</span>
+                    </button>
+                    {isSelected && schools.length > 0 && (
+                      <div className="pl-4 space-y-1 animate-in slide-in-from-top-1 duration-200">
+                        {schools.map(sch => {
+                          const schCount = facultyDatabase.filter(f => f.university === uni && f.school === sch).length;
+                          const isSchSelected = selectedSchool === sch;
+                          return (
+                            <div key={sch} className="space-y-1">
+                              <button
+                                onClick={() => {
+                                  setSelectedSchool(sch);
+                                  setSelectedDepartment('all');
+                                }}
+                                className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-xs transition-all ${isSchSelected ? 'text-blue-600 font-bold bg-blue-50/30' : 'text-gray-500 hover:text-gray-700 font-medium'}`}
+                              >
+                                <span className="truncate pr-2">{sch}</span>
+                                <span className="flex-shrink-0">{schCount}</span>
+                              </button>
+                              {isSchSelected && departments.length > 0 && (
+                                <div className="pl-4 space-y-1">
+                                  {departments.map(dept => {
+                                    const deptCount = facultyDatabase.filter(f => f.university === uni && f.school === sch && f.department === dept).length;
+                                    return (
+                                      <button
+                                        key={dept}
+                                        onClick={() => setSelectedDepartment(dept)}
+                                        className={`w-full flex items-center justify-between px-3 py-1 rounded-lg text-[10px] transition-all ${selectedDepartment === dept ? 'text-blue-500 font-bold' : 'text-gray-400 hover:text-gray-600 font-medium'}`}
+                                      >
+                                        <span className="truncate pr-2">{dept}</span>
+                                        <span className="flex-shrink-0">{deptCount}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
@@ -529,20 +591,34 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                 />
               </div>
               
-              {/* Filters Dropdown (Simplified for now) */}
+              {/* Filters Dropdown (Hierarchical) */}
               <div className="flex items-center gap-2">
-                {selectedCountry !== 'all' && subRegions.length > 0 && (
+                {selectedCountry !== 'all' && provinceStates.length > 0 && (
                   <select 
-                    value={selectedSubRegion} 
+                    value={selectedProvinceState} 
                     onChange={(e) => {
-                      setSelectedSubRegion(e.target.value);
+                      setSelectedProvinceState(e.target.value);
+                      setSelectedCity('all');
                       setSelectedUniversity('all');
-                      setSelectedDepartment('all');
                     }}
                     className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200"
                   >
-                    <option value="all">所有地区</option>
-                    {subRegions.map(r => <option key={r} value={r}>{r}</option>)}
+                    <option value="all">所有省/州</option>
+                    {provinceStates.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                )}
+
+                {selectedProvinceState !== 'all' && cities.length > 0 && (
+                  <select 
+                    value={selectedCity} 
+                    onChange={(e) => {
+                      setSelectedCity(e.target.value);
+                      setSelectedUniversity('all');
+                    }}
+                    className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200"
+                  >
+                    <option value="all">所有城市</option>
+                    {cities.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 )}
 
@@ -550,6 +626,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   value={selectedUniversity} 
                   onChange={(e) => {
                     setSelectedUniversity(e.target.value);
+                    setSelectedSchool('all');
                     setSelectedDepartment('all');
                   }}
                   className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm"
@@ -558,13 +635,27 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   {universities.map(u => <option key={u} value={u}>{u}</option>)}
                 </select>
 
+                {selectedUniversity !== 'all' && schools.length > 0 && (
+                  <select 
+                    value={selectedSchool} 
+                    onChange={(e) => {
+                      setSelectedSchool(e.target.value);
+                      setSelectedDepartment('all');
+                    }}
+                    className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200"
+                  >
+                    <option value="all">所有学院</option>
+                    {schools.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                )}
+
                 {selectedUniversity !== 'all' && departments.length > 0 && (
                   <select 
                     value={selectedDepartment} 
                     onChange={(e) => setSelectedDepartment(e.target.value)}
                     className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200"
                   >
-                    <option value="all">所有院系</option>
+                    <option value="all">所有系/部门</option>
                     {departments.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 )}
@@ -572,29 +663,12 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
             </div>
 
             <div className="flex items-center gap-3">
-              <input 
-                type="file" 
-                accept=".xlsx, .xls, .csv" 
-                className="hidden" 
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-              />
               <button 
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isImporting}
-                className={`flex items-center gap-2 px-4 py-2 bg-white/60 backdrop-blur-sm border border-white/50 text-gray-700 rounded-xl transition-all shadow-sm font-bold ${isImporting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/80 active:scale-95'}`}
+                onClick={() => setIsXlsxImportModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/60 backdrop-blur-sm border border-white/50 text-gray-700 rounded-xl hover:bg-white/80 transition-all shadow-sm font-bold active:scale-95"
               >
-                {isImporting ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                    导入中 ({importProgress.current}/{importProgress.total})
-                  </>
-                ) : (
-                  <>
-                    <Upload size={16} />
-                    批量导入
-                  </>
-                )}
+                <Upload size={16} />
+                批量导入
               </button>
               <button 
                 onClick={() => setIsManualEntryModalOpen(true)}
@@ -761,12 +835,12 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                           </td>
                           <td className="p-4">
                             <div className="flex flex-wrap gap-1 max-w-xs">
-                              {(faculty.researchAreas || []).slice(0, 2).map((area, i) => (
+                              {faculty.researchAreas.slice(0, 2).map((area, i) => (
                                 <span key={i} className="px-2 py-0.5 bg-white/60 backdrop-blur-sm text-gray-600 rounded-md text-xs truncate max-w-[100px] shadow-sm border border-white/50 font-medium">
                                   {area}
                                 </span>
                               ))}
-                              {faculty.researchAreas && faculty.researchAreas.length > 2 && (
+                              {faculty.researchAreas.length > 2 && (
                                 <span className="px-2 py-0.5 bg-white/40 text-gray-500 rounded-md text-xs border border-white/30 font-medium">
                                   +{faculty.researchAreas.length - 2}
                                 </span>
@@ -785,7 +859,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                           <td className="p-4">
                             {faculty.linkedClientIds && faculty.linkedClientIds.length > 0 ? (
                               <div className="flex -space-x-2">
-                                {(faculty.linkedClientIds || []).slice(0, 3).map(cid => {
+                                {faculty.linkedClientIds.slice(0, 3).map(cid => {
                                   const client = clients.find(c => c.id === cid);
                                   return (
                                     <div key={cid} className="w-8 h-8 rounded-full bg-white/80 backdrop-blur-sm border-2 border-white shadow-sm flex items-center justify-center text-xs font-bold text-gray-600" title={client?.name}>
@@ -836,8 +910,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
         isOpen={isBatchClassifyModalOpen}
         onClose={() => setIsBatchClassifyModalOpen(false)}
         selectedCount={selectedIds.size}
-        onSave={(updates) => {
-          onBatchUpdateFaculty(Array.from(selectedIds), updates);
+        onConfirm={(updates) => {
+          onBatchUpdateFaculty?.(Array.from(selectedIds), updates);
           setSelectedIds(new Set());
         }}
       />
@@ -1011,13 +1085,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">申请截止日期</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.deadlineData?.[0]?.value || ''}
-                    onChange={(e) => {
-                      const newData = [...(editingFaculty.deadlineData || [])];
-                      if (newData.length === 0) newData.push({ value: '', sourceUrl: '' });
-                      newData[0] = { ...newData[0], value: e.target.value };
-                      setEditingFaculty({...editingFaculty, deadlineData: newData});
-                    }}
+                    value={editingFaculty.deadlineData?.value || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, deadlineData: { ...editingFaculty.deadlineData, value: e.target.value, sourceUrl: editingFaculty.deadlineData?.sourceUrl || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1025,13 +1094,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">截止日期来源URL</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.deadlineData?.[0]?.sourceUrl || ''}
-                    onChange={(e) => {
-                      const newData = [...(editingFaculty.deadlineData || [])];
-                      if (newData.length === 0) newData.push({ value: '', sourceUrl: '' });
-                      newData[0] = { ...newData[0], sourceUrl: e.target.value };
-                      setEditingFaculty({...editingFaculty, deadlineData: newData});
-                    }}
+                    value={editingFaculty.deadlineData?.sourceUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, deadlineData: { ...editingFaculty.deadlineData, sourceUrl: e.target.value, value: editingFaculty.deadlineData?.value || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1039,13 +1103,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                 <div className="col-span-2 space-y-2">
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">申请要求及材料</label>
                   <textarea 
-                    value={editingFaculty.applicationReqsData?.[0]?.value || ''}
-                    onChange={(e) => {
-                      const newData = [...(editingFaculty.applicationReqsData || [])];
-                      if (newData.length === 0) newData.push({ value: '', sourceUrl: '' });
-                      newData[0] = { ...newData[0], value: e.target.value };
-                      setEditingFaculty({...editingFaculty, applicationReqsData: newData});
-                    }}
+                    value={editingFaculty.applicationReqsData?.value || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, applicationReqsData: { ...editingFaculty.applicationReqsData, value: e.target.value, sourceUrl: editingFaculty.applicationReqsData?.sourceUrl || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium h-20 resize-none"
                   />
                 </div>
@@ -1053,13 +1112,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">申请要求来源URL</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.applicationReqsData?.[0]?.sourceUrl || ''}
-                    onChange={(e) => {
-                      const newData = [...(editingFaculty.applicationReqsData || [])];
-                      if (newData.length === 0) newData.push({ value: '', sourceUrl: '' });
-                      newData[0] = { ...newData[0], sourceUrl: e.target.value };
-                      setEditingFaculty({...editingFaculty, applicationReqsData: newData});
-                    }}
+                    value={editingFaculty.applicationReqsData?.sourceUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, applicationReqsData: { ...editingFaculty.applicationReqsData, sourceUrl: e.target.value, value: editingFaculty.applicationReqsData?.value || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1068,13 +1122,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">RP字数要求</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.rpReqsData?.[0]?.value || ''}
-                    onChange={(e) => {
-                      const newData = [...(editingFaculty.rpReqsData || [])];
-                      if (newData.length === 0) newData.push({ value: '', sourceUrl: '' });
-                      newData[0] = { ...newData[0], value: e.target.value };
-                      setEditingFaculty({...editingFaculty, rpReqsData: newData});
-                    }}
+                    value={editingFaculty.rpReqsData?.value || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, rpReqsData: { ...editingFaculty.rpReqsData, value: e.target.value, sourceUrl: editingFaculty.rpReqsData?.sourceUrl || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1082,13 +1131,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">RP要求来源URL</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.rpReqsData?.[0]?.sourceUrl || ''}
-                    onChange={(e) => {
-                      const newData = [...(editingFaculty.rpReqsData || [])];
-                      if (newData.length === 0) newData.push({ value: '', sourceUrl: '' });
-                      newData[0] = { ...newData[0], sourceUrl: e.target.value };
-                      setEditingFaculty({...editingFaculty, rpReqsData: newData});
-                    }}
+                    value={editingFaculty.rpReqsData?.sourceUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, rpReqsData: { ...editingFaculty.rpReqsData, sourceUrl: e.target.value, value: editingFaculty.rpReqsData?.value || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1097,13 +1141,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">学费</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.tuitionData?.[0]?.value || ''}
-                    onChange={(e) => {
-                      const newData = [...(editingFaculty.tuitionData || [])];
-                      if (newData.length === 0) newData.push({ value: '', sourceUrl: '' });
-                      newData[0] = { ...newData[0], value: e.target.value };
-                      setEditingFaculty({...editingFaculty, tuitionData: newData});
-                    }}
+                    value={editingFaculty.tuitionData?.value || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, tuitionData: { ...editingFaculty.tuitionData, value: e.target.value, sourceUrl: editingFaculty.tuitionData?.sourceUrl || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1111,13 +1150,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">学费来源URL</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.tuitionData?.[0]?.sourceUrl || ''}
-                    onChange={(e) => {
-                      const newData = [...(editingFaculty.tuitionData || [])];
-                      if (newData.length === 0) newData.push({ value: '', sourceUrl: '' });
-                      newData[0] = { ...newData[0], sourceUrl: e.target.value };
-                      setEditingFaculty({...editingFaculty, tuitionData: newData});
-                    }}
+                    value={editingFaculty.tuitionData?.sourceUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, tuitionData: { ...editingFaculty.tuitionData, sourceUrl: e.target.value, value: editingFaculty.tuitionData?.value || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1125,13 +1159,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                 <div className="col-span-2 space-y-2">
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">奖学金项目</label>
                   <textarea 
-                    value={editingFaculty.scholarshipData?.[0]?.value || ''}
-                    onChange={(e) => {
-                      const newData = [...(editingFaculty.scholarshipData || [])];
-                      if (newData.length === 0) newData.push({ value: '', sourceUrl: '' });
-                      newData[0] = { ...newData[0], value: e.target.value };
-                      setEditingFaculty({...editingFaculty, scholarshipData: newData});
-                    }}
+                    value={editingFaculty.scholarshipData?.value || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, scholarshipData: { ...editingFaculty.scholarshipData, value: e.target.value, sourceUrl: editingFaculty.scholarshipData?.sourceUrl || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium h-20 resize-none"
                   />
                 </div>
@@ -1139,13 +1168,8 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">奖学金来源URL</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.scholarshipData?.[0]?.sourceUrl || ''}
-                    onChange={(e) => {
-                      const newData = [...(editingFaculty.scholarshipData || [])];
-                      if (newData.length === 0) newData.push({ value: '', sourceUrl: '' });
-                      newData[0] = { ...newData[0], sourceUrl: e.target.value };
-                      setEditingFaculty({...editingFaculty, scholarshipData: newData});
-                    }}
+                    value={editingFaculty.scholarshipData?.sourceUrl || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, scholarshipData: { ...editingFaculty.scholarshipData, sourceUrl: e.target.value, value: editingFaculty.scholarshipData?.value || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1375,6 +1399,13 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
         data={importPreviewData}
         facultyDatabase={facultyDatabase}
       />
+      {isXlsxImportModalOpen && (
+        <XlsxImportModal
+          isOpen={isXlsxImportModalOpen}
+          onClose={() => setIsXlsxImportModalOpen(false)}
+          onImport={handleConfirmImport}
+        />
+      )}
     </div>
   );
 };

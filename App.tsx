@@ -17,9 +17,11 @@ import CreateClientModal from './components/CreateClientModal';
 import FacultyDatabase from './components/FacultyDatabase';
 import ChatBot from './components/ChatBot';
 import { TabId } from './components/Sidebar';
-import { Client, FacultyRecord, FacultyMember, FacultyMatch } from './types';
-import { scoreFacultyFromDatabase } from './services/geminiService';
 import { Construction, MessageCircle, GripHorizontal, Minimize2, Maximize2, X } from 'lucide-react';
+import { Client, FacultyRecord, FacultyMember, FacultyMatch, MatcherSearchFilters, SourceMode, RecommendationOrigin, MentorEvaluationSnapshot, MentorRecommendation } from './types';
+import { buildFacultyRecordFromMember, migrateFacultyDatabase, normalizeFacultyRecord, upsertFacultyRecord } from './services/facultyNormalization';
+import { readPersistedValue, removePersistedValue, writePersistedValue } from './services/persistentStorage';
+import { buildMatcherFiltersFromClient, migrateClients, syncClientSelectionProfile } from './services/selectionProfile';
 
 const ComingSoon = ({ title }: { title: string }) => (
   <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8">
@@ -33,7 +35,33 @@ const ComingSoon = ({ title }: { title: string }) => (
   </div>
 );
 
+const localStorage = {
+  getItem(key: string) {
+    const value = readPersistedValue<unknown | null>(key, null);
+    if (value === null || typeof value === 'undefined') {
+      return null;
+    }
+    return typeof value === 'string' ? value : JSON.stringify(value);
+  },
+  setItem(key: string, value: string) {
+    try {
+      writePersistedValue(key, JSON.parse(value));
+    } catch {
+      writePersistedValue(key, value);
+    }
+  },
+  removeItem(key: string) {
+    removePersistedValue(key);
+  },
+};
+
 function App() {
+  const buildDefaultClients = (): Client[] =>
+    migrateClients([
+      { id: '1', name: '段同学', status: 'active', createdAt: '2026-02-21', advisor: '未分配', contact: '暂无联系方式' },
+      { id: '2', name: '李同学 - 斯坦福申请', status: 'active', createdAt: '2024-03-15', advisor: '王老师' },
+    ]);
+
   // Initialize state from localStorage or defaults
   const [activeTab, setActiveTab] = useState<TabId>(() => {
     try {
@@ -49,49 +77,32 @@ function App() {
   const [clients, setClients] = useState<Client[]>(() => {
     try {
       const savedClients = localStorage.getItem('scholarsync_clients');
-      return savedClients ? JSON.parse(savedClients) : [
-        { id: '1', name: '段', status: 'active', createdAt: '2026/02/21', advisor: '未分配', contact: '暂无联系方式' },
-        { id: '2', name: '李同学 - 斯坦福申请', status: 'active', createdAt: '2024-03-15', advisor: '王老师' },
-      ];
+      return savedClients ? migrateClients(JSON.parse(savedClients)) : buildDefaultClients();
     } catch (e) {
       console.error('LocalStorage access failed:', e);
-      return [
-        { id: '1', name: '段', status: 'active', createdAt: '2026/02/21', advisor: '未分配', contact: '暂无联系方式' },
-        { id: '2', name: '李同学 - 斯坦福申请', status: 'active', createdAt: '2024-03-15', advisor: '王老师' },
-      ];
+      return buildDefaultClients();
     }
   });
 
   const [facultyDatabase, setFacultyDatabase] = useState<FacultyRecord[]>(() => {
     try {
       const savedDB = localStorage.getItem('scholarsync_faculty_db');
-      return savedDB ? JSON.parse(savedDB) : [];
+      return savedDB ? migrateFacultyDatabase(JSON.parse(savedDB)) : [];
     } catch (e) {
       console.error('LocalStorage access failed:', e);
       return [];
     }
   });
 
-  const [selectedClient, setSelectedClient] = useState<Client | null>(() => {
-    try {
-      const savedClientId = localStorage.getItem('scholarsync_selectedClientId');
-      if (savedClientId) {
-        const savedClientsStr = localStorage.getItem('scholarsync_clients');
-        const initialClients = savedClientsStr ? JSON.parse(savedClientsStr) : [
-          { id: '1', name: '段', status: 'active', createdAt: '2026/02/21', advisor: '未分配', contact: '暂无联系方式' },
-          { id: '2', name: '李同学 - 斯坦福申请', status: 'active', createdAt: '2024-03-15', advisor: '王老师' },
-        ];
-        return initialClients.find((c: Client) => c.id === savedClientId) || null;
-      }
-    } catch (e) {
-      console.error('LocalStorage access failed:', e);
-    }
-    return null;
-  });
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
   const [isCreateClientModalOpen, setIsCreateClientModalOpen] = useState(false);
   const [editingDocument, setEditingDocument] = useState<{ id: string; content: string; type: string; title: string } | null>(null);
-  const [clientDetailInitialTab, setClientDetailInitialTab] = useState<'profile' | 'documents'>('profile');
+  const [clientDetailInitialTab, setClientDetailInitialTab] = useState<'profile' | 'documents' | 'mentors'>('profile');
+  const [facultyDbContext, setFacultyDbContext] = useState<{
+    clientId: string;
+    filters?: MatcherSearchFilters;
+  } | null>(null);
 
   // ChatBot State
   const [showChatBot, setShowChatBot] = useState(false);
@@ -126,36 +137,55 @@ function App() {
     }
   }, [facultyDatabase]);
 
-  useEffect(() => {
-    try {
-      if (selectedClient) {
-        localStorage.setItem('scholarsync_selectedClientId', selectedClient.id);
-      } else {
-        localStorage.removeItem('scholarsync_selectedClientId');
-      }
-    } catch (e) {
-      console.error('LocalStorage write failed:', e);
+  const handleTabChange = (tab: TabId) => {
+    if (tab === 'users') {
+      setSelectedClient(null);
+      setClientDetailInitialTab('profile');
     }
-  }, [selectedClient]);
+    if (tab !== 'faculty-db') {
+      setFacultyDbContext(null);
+    }
+    setActiveTab(tab);
+  };
+
+  const navigateToWorkbench = (tab: TabId) => {
+    setPreviousTab(activeTab);
+    setActiveTab(tab);
+  };
+
+  const handleWorkbenchBack = () => {
+    setEditingDocument(null);
+    setActiveTab(previousTab || 'dashboard');
+  };
+
+  const upsertSelectedClient = (client: Client | null) => {
+    setSelectedClient(client ? syncClientSelectionProfile(client) : null);
+  };
+
+  const normalizeClient = (client: Client) => syncClientSelectionProfile(client);
 
   const addClient = (clientData: Partial<Client> & { name: string }) => {
-    const newClient: Client = {
+    const newClient = normalizeClient({
       id: Math.random().toString(36).substr(2, 9),
       status: 'active',
       createdAt: new Date().toISOString().split('T')[0], // YYYY-MM-DD
       advisor: '未分配',
       contact: '暂无联系方式',
+      mentorRecommendations: [],
       ...clientData
-    };
-    setClients([...clients, newClient]);
+    } as Client);
+    setClients((prev) => [...prev, newClient]);
+    return newClient;
   };
 
   const batchAddClients = (newClients: Client[]) => {
     console.log('App: Batch adding clients', newClients.length);
-    const processedClients = newClients.map(c => ({
-      ...c,
-      id: c.id || Math.random().toString(36).substr(2, 9)
-    }));
+    const processedClients = newClients.map((client) =>
+      normalizeClient({
+        ...client,
+        id: client.id || Math.random().toString(36).substr(2, 9),
+      } as Client),
+    );
 
     setClients(prev => {
       const clientMap = new Map(prev.map(c => [c.id, c]));
@@ -169,14 +199,16 @@ function App() {
   };
 
   const updateClient = (updatedClient: Client) => {
-    setClients(clients.map(c => c.id === updatedClient.id ? updatedClient : c));
-    if (selectedClient?.id === updatedClient.id) {
-      setSelectedClient(updatedClient);
+    const normalized = normalizeClient(updatedClient);
+    setClients((prev) => prev.map((client) => (client.id === normalized.id ? normalized : client)));
+    if (selectedClient?.id === normalized.id) {
+      upsertSelectedClient(normalized);
     }
   };
 
   const deleteClient = (clientId: string) => {
     console.log('App: Deleting client', clientId);
+    window.alert('正在删除客户: ' + clientId);
     setClients(prev => {
       const filtered = prev.filter(c => c.id !== clientId);
       console.log('App: Clients after deletion', filtered.length);
@@ -188,347 +220,96 @@ function App() {
       linkedClientIds: f.linkedClientIds?.filter(id => id !== clientId) || []
     })));
 
-    setSelectedClient(prev => prev?.id === clientId ? null : prev);
+    upsertSelectedClient(selectedClient?.id === clientId ? null : selectedClient);
   };
 
   // Faculty Database Operations
-  const batchAddFacultyToDatabase = (items: { faculty: FacultyMember, country?: string, fieldCategory?: string, extra?: Partial<FacultyRecord> }[]) => {
-    setFacultyDatabase(prev => {
-      const newDatabase = [...prev];
-      const addedIds: string[] = [];
-
-      items.forEach(({ faculty, country: manualCountry, fieldCategory: manualField, extra }) => {
-        const existing = newDatabase.find(f => 
-          f.name.toLowerCase() === faculty.name.toLowerCase() && 
-          f.university.toLowerCase() === faculty.university.toLowerCase()
-        );
-
-        // Unified Classifier Logic (re-implementing inside to avoid stale scope if needed, 
-        // but here we can just use a helper or the one defined in the component if it doesn't use state)
-        const classify = (f: FacultyMember, mCountry?: string, mField?: string) => {
-          let normalizedManualCountry = mCountry;
-          let manualSubRegion = "";
-          if (mCountry) {
-            const mcLower = mCountry.toLowerCase();
-            if (mcLower.includes('china') || mcLower.includes('中国')) {
-              normalizedManualCountry = '中国';
-              if (mcLower.includes('beijing') || mcLower.includes('北京')) manualSubRegion = '北京';
-              else if (mcLower.includes('shanghai') || mcLower.includes('上海')) manualSubRegion = '上海';
-              else if (mcLower.includes('hangzhou') || mcLower.includes('杭州')) manualSubRegion = '杭州';
-              else if (mcLower.includes('xi\'an') || mcLower.includes('xian') || mcLower.includes('西安')) manualSubRegion = '西安';
-              else if (mcLower.includes('hong kong') || mcLower.includes('香港')) manualSubRegion = '香港';
-            }
-          }
-
-          let country = normalizedManualCountry || f.matchReasoning?.locationCheck || "";
-          let subRegion = manualSubRegion || "";
-          let regionPath: string[] = [];
-          if (country === '中国') {
-            regionPath = ['中国', subRegion || '其他'];
-          } else if (country) {
-            regionPath = [country];
-          }
-
-          let fieldCategory = mField || "";
-          let subFieldCategory = "";
-          let path: string[] = [];
-
-          if (!fieldCategory) {
-            const fieldContext = (f.department + " " + (f.researchAreas?.join(" ") || "")).toLowerCase();
-            if (fieldContext.includes('computer') || fieldContext.includes('software') || fieldContext.includes('ai') || fieldContext.includes('intelligence') || fieldContext.includes('data')) {
-              fieldCategory = "计算机科学";
-              if (fieldContext.includes('ai') || fieldContext.includes('intelligence') || fieldContext.includes('machine learning')) {
-                subFieldCategory = "人工智能";
-                path = ["工程与技术", "计算机科学", "人工智能"];
-              } else if (fieldContext.includes('security') || fieldContext.includes('cryptography')) {
-                subFieldCategory = "网络安全";
-                path = ["工程与技术", "计算机科学", "网络安全"];
-              } else if (fieldContext.includes('data') || fieldContext.includes('analytics') || fieldContext.includes('mining')) {
-                subFieldCategory = "数据科学";
-                path = ["工程与技术", "计算机科学", "数据科学"];
-              } else {
-                subFieldCategory = "通用计算机";
-                path = ["工程与技术", "计算机科学"];
-              }
-            } else if (fieldContext.includes('mechanical') || fieldContext.includes('robotics') || fieldContext.includes('mechatronics') || fieldContext.includes('automation') || fieldContext.includes('control')) {
-              fieldCategory = "机械工程";
-              subFieldCategory = fieldContext.includes('robot') ? "机器人学" : "通用机械";
-              path = ["工程与技术", "机械工程"];
-            } else if (fieldContext.includes('finance') || fieldContext.includes('economics') || fieldContext.includes('accounting') || fieldContext.includes('business') || fieldContext.includes('management')) {
-              fieldCategory = "商科与经济";
-              if (fieldContext.includes('finance')) {
-                subFieldCategory = "金融学";
-                path = ["社会科学", "商科与经济", "金融学"];
-              } else if (fieldContext.includes('economics')) {
-                subFieldCategory = "经济学";
-                path = ["社会科学", "商科与经济", "经济学"];
-              } else {
-                subFieldCategory = "工商管理";
-                path = ["社会科学", "商科与经济", "工商管理"];
-              }
-            } else if (fieldContext.includes('biology') || fieldContext.includes('bio') || fieldContext.includes('genetics') || fieldContext.includes('medical') || fieldContext.includes('health')) {
-              fieldCategory = "生物与医学";
-              subFieldCategory = fieldContext.includes('medical') ? "临床医学" : "生物科学";
-              path = ["生命科学", "生物与医学"];
-            } else if (f.department) {
-              fieldCategory = f.department;
-              path = [f.department];
-            }
-          } else {
-            path = [fieldCategory];
-          }
-
-          return { country, subRegion, regionPath, fieldCategory, subFieldCategory, classificationPath: path };
-        };
-
-        const classification = classify(faculty, manualCountry, manualField);
-        const finalClassification = { ...classification, ...extra };
-
-        // Clear matchScore when adding to database as it's student-specific
-        const facultyToSave = { ...faculty, matchScore: 0 };
-
-        if (existing) {
-          const isManual = existing.classificationSource === 'manual' || existing.classificationSource === 'hybrid' || extra?.classificationSource === 'manual';
-          const updatedIdx = newDatabase.findIndex(f => f.id === existing.id);
-          newDatabase[updatedIdx] = {
-            ...existing,
-            ...facultyToSave,
-            country: isManual ? (extra?.country || existing.country) : classification.country,
-            fieldCategory: isManual ? (extra?.fieldCategory || existing.fieldCategory) : classification.fieldCategory,
-            subFieldCategory: isManual ? (extra?.subFieldCategory || existing.subFieldCategory) : classification.subFieldCategory,
-            classificationPath: isManual ? (extra?.classificationPath || existing.classificationPath) : classification.classificationPath,
-            classificationNote: extra?.classificationNote || existing.classificationNote,
-            classificationSource: extra?.classificationSource || (isManual ? 'hybrid' : 'auto'),
-            updatedAt: new Date().toISOString(),
-            source: 'search'
-          };
-          addedIds.push(existing.id);
-        } else {
-          const newId = crypto.randomUUID();
-          const newRecord: FacultyRecord = {
-            ...facultyToSave,
-            id: newId,
-            ...finalClassification,
-            classificationSource: extra?.classificationSource || 'auto',
-            addedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            source: 'search',
-            linkedClientIds: []
-          };
-          newDatabase.push(newRecord);
-          addedIds.push(newId);
-        }
-      });
-
-      return newDatabase;
+  const addFacultyToDatabase = (faculty: FacultyMember, manualCountry?: string, manualField?: string, extra?: Partial<FacultyRecord>): string => {
+    const incomingRecord = buildFacultyRecordFromMember(faculty, {
+      manualCountry,
+      manualField,
+      extra,
     });
+
+    const result = upsertFacultyRecord(facultyDatabase, incomingRecord);
+    setFacultyDatabase(result.records);
+    return result.id;
   };
 
-  const addFacultyToDatabase = (faculty: FacultyMember, manualCountry?: string, manualField?: string, extra?: Partial<FacultyRecord>): string => {
-    // Check for duplicates (Name + University)
-    const existing = facultyDatabase.find(f => 
-      f.name.toLowerCase() === faculty.name.toLowerCase() && 
-      f.university.toLowerCase() === faculty.university.toLowerCase()
-    );
-
-    // Unified Classifier Logic
-    const classify = (f: FacultyMember, mCountry?: string, mField?: string) => {
-      // Normalize manual country if it contains China sub-regions
-      let normalizedManualCountry = mCountry;
-      let manualSubRegion = "";
-      if (mCountry) {
-        const mcLower = mCountry.toLowerCase();
-        if (mcLower.includes('china') || mcLower.includes('中国')) {
-          normalizedManualCountry = '中国';
-          if (mcLower.includes('beijing') || mcLower.includes('北京')) manualSubRegion = '北京';
-          else if (mcLower.includes('shanghai') || mcLower.includes('上海')) manualSubRegion = '上海';
-          else if (mcLower.includes('hangzhou') || mcLower.includes('杭州')) manualSubRegion = '杭州';
-          else if (mcLower.includes('xi\'an') || mcLower.includes('xian') || mcLower.includes('西安')) manualSubRegion = '西安';
-          else if (mcLower.includes('hong kong') || mcLower.includes('香港')) manualSubRegion = '香港';
-        }
-      }
-
-      // 1. Country & Region Classification
-      let country = normalizedManualCountry || f.matchReasoning?.locationCheck || "";
-      let subRegion = manualSubRegion;
-      let regionPath = ["未分类"];
-
-      const uni = f.university.toLowerCase();
-      const dept = (f.department || "").toLowerCase();
-      const loc = (f.matchReasoning?.locationCheck || "").toLowerCase();
-      const context = `${uni} ${dept} ${loc}`.toLowerCase();
-
-      // China Region Detection
-      const chinaRegions = [
-        { name: '北京', keywords: ['beijing', 'peking', '北京'] },
-        { name: '上海', keywords: ['shanghai', '上海'] },
-        { name: '杭州', keywords: ['hangzhou', 'zhejiang', 'west lake', '杭州', '浙江'] },
-        { name: '西安', keywords: ['xi\'an', 'xian', 'shaanxi', 'northwestern polytechnical', 'xidian', '西安', '陕西'] },
-        { name: '南京', keywords: ['nanjing', 'jiangsu', '南京', '江苏'] },
-        { name: '广州', keywords: ['guangzhou', 'sun yat-sen', 'canton', '广州', '广东'] },
-        { name: '深圳', keywords: ['shenzhen', 'sustech', '深圳'] },
-        { name: '成都', keywords: ['chengdu', 'sichuan', '成都', '四川'] },
-        { name: '武汉', keywords: ['wuhan', 'hubei', '武汉', '湖北'] },
-        { name: '合肥', keywords: ['hefei', 'ustc', '合肥', '安徽'] },
-        { name: '哈尔滨', keywords: ['harbin', 'hit', '哈尔滨', '黑龙江'] },
-        { name: '香港', keywords: ['hong kong', 'hku', 'cuhk', 'ust', 'cityu', 'polyu', '香港'] },
-        { name: '澳门', keywords: ['macau', 'macao', '澳门'] },
-        { name: '台湾', keywords: ['taiwan', 'ntu', 'tsing hua university (taiwan)', '台湾'] },
-      ];
-
-      const detectedChinaRegion = chinaRegions.find(r => r.keywords.some(k => context.includes(k)));
-
-      if (country === '中国' || detectedChinaRegion || context.includes('china') || context.includes('中国')) {
-        country = '中国';
-        if (manualSubRegion) {
-          subRegion = manualSubRegion;
-          regionPath = ['中国', manualSubRegion];
-        } else if (detectedChinaRegion) {
-          subRegion = detectedChinaRegion.name;
-          regionPath = ['中国', detectedChinaRegion.name];
-        } else {
-          regionPath = ['中国'];
-        }
-      } else if (!country || country === "未核查" || country === "未分类") {
-        if (uni.includes('stanford') || uni.includes('harvard') || uni.includes('mit') || uni.includes('california') || uni.includes('yale') || uni.includes('princeton') || uni.includes('columbia') || uni.includes('cornell') || uni.includes('pennsylvania')) {
-          country = '美国';
-          regionPath = ['美国'];
-        } else if (uni.includes('oxford') || uni.includes('cambridge') || uni.includes('imperial') || uni.includes('ucl') || uni.includes('london') || uni.includes('manchester') || uni.includes('edinburgh')) {
-          country = '英国';
-          regionPath = ['英国'];
-        } else if (uni.includes('melbourne') || uni.includes('sydney') || uni.includes('unsw') || uni.includes('queensland') || uni.includes('monash')) {
-          country = '澳洲';
-          regionPath = ['澳洲'];
-        } else if (uni.includes('toronto') || uni.includes('ubc') || uni.includes('mcgill') || uni.includes('waterloo')) {
-          country = '加拿大';
-          regionPath = ['加拿大'];
-        } else if (uni.includes('nus') || uni.includes('ntu') || uni.includes('singapore')) {
-          country = '新加坡';
-          regionPath = ['新加坡'];
-        } else {
-          country = country || '未分类';
-          regionPath = [country];
-        }
-      } else {
-        regionPath = [country];
-      }
-
-      // 2. Field Classification
-      const fieldContext = `${f.department || ''} ${f.researchAreas.join(' ')} ${f.alignmentDetails || ''} ${f.title}`.toLowerCase();
-      
-      let fieldCategory = mField || "未分类";
-      let subFieldCategory = "未分类";
-      let path = ["未分类"];
-
-      // Simple keyword-based scoring/matching
-      if (fieldCategory === "未分类" || !mField) {
-        if (fieldContext.includes('computer science') || fieldContext.includes('cs') || fieldContext.includes('software') || fieldContext.includes('artificial intelligence') || fieldContext.includes('ai') || fieldContext.includes('machine learning') || fieldContext.includes('data science')) {
-          fieldCategory = "计算机科学";
-          if (fieldContext.includes('ai') || fieldContext.includes('machine learning') || fieldContext.includes('deep learning') || fieldContext.includes('neural')) {
-            subFieldCategory = "人工智能";
-            path = ["工程与技术", "计算机科学", "人工智能"];
-          } else if (fieldContext.includes('security') || fieldContext.includes('cryptography') || fieldContext.includes('privacy')) {
-            subFieldCategory = "网络安全";
-            path = ["工程与技术", "计算机科学", "网络安全"];
-          } else if (fieldContext.includes('data') || fieldContext.includes('analytics') || fieldContext.includes('mining')) {
-            subFieldCategory = "数据科学";
-            path = ["工程与技术", "计算机科学", "数据科学"];
-          } else {
-            subFieldCategory = "通用计算机";
-            path = ["工程与技术", "计算机科学"];
-          }
-        } else if (fieldContext.includes('mechanical') || fieldContext.includes('robotics') || fieldContext.includes('mechatronics') || fieldContext.includes('automation') || fieldContext.includes('control')) {
-          fieldCategory = "机械工程";
-          subFieldCategory = fieldContext.includes('robot') ? "机器人学" : "通用机械";
-          path = ["工程与技术", "机械工程"];
-        } else if (fieldContext.includes('finance') || fieldContext.includes('economics') || fieldContext.includes('accounting') || fieldContext.includes('business') || fieldContext.includes('management')) {
-          fieldCategory = "商科与经济";
-          if (fieldContext.includes('finance')) {
-            subFieldCategory = "金融学";
-            path = ["社会科学", "商科与经济", "金融学"];
-          } else if (fieldContext.includes('economics')) {
-            subFieldCategory = "经济学";
-            path = ["社会科学", "商科与经济", "经济学"];
-          } else {
-            subFieldCategory = "工商管理";
-            path = ["社会科学", "商科与经济", "工商管理"];
-          }
-        } else if (fieldContext.includes('biology') || fieldContext.includes('bio') || fieldContext.includes('genetics') || fieldContext.includes('medical') || fieldContext.includes('health')) {
-          fieldCategory = "生物与医学";
-          subFieldCategory = fieldContext.includes('medical') ? "临床医学" : "生物科学";
-          path = ["生命科学", "生物与医学"];
-        } else if (f.department) {
-          fieldCategory = f.department;
-          path = [f.department];
-        }
-      } else {
-        path = [fieldCategory];
-      }
-
-      return { country, subRegion, regionPath, fieldCategory, subFieldCategory, classificationPath: path };
+  const importFacultyRecords = (records: FacultyRecord[]) => {
+    const summary = {
+      createdFacultyCount: 0,
+      mergedFacultyCount: 0,
+      appendedProjectCount: 0,
     };
 
-    // Use existing logic but allow extra to override
-    const classification = classify(faculty, manualCountry, manualField);
-    
-    const finalClassification = {
-      ...classification,
-      ...extra
-    };
-
-    // Clear matchScore when adding to database as it's student-specific
-    const facultyToSave = { ...faculty, matchScore: 0 };
-
-    if (existing) {
-      // Update existing
-      setFacultyDatabase(prev => prev.map(f => {
-        if (f.id === existing.id) {
-          // If manual classification exists, don't overwrite with auto
-          const isManual = f.classificationSource === 'manual' || f.classificationSource === 'hybrid' || extra?.classificationSource === 'manual';
-          
-          return {
-            ...f,
-            ...facultyToSave,
-            country: isManual ? (extra?.country || f.country) : classification.country,
-            fieldCategory: isManual ? (extra?.fieldCategory || f.fieldCategory) : classification.fieldCategory,
-            subFieldCategory: isManual ? (extra?.subFieldCategory || f.subFieldCategory) : classification.subFieldCategory,
-            classificationPath: isManual ? (extra?.classificationPath || f.classificationPath) : classification.classificationPath,
-            classificationNote: extra?.classificationNote || f.classificationNote,
-            classificationSource: extra?.classificationSource || (isManual ? 'hybrid' : 'auto'),
-            updatedAt: new Date().toISOString(),
-            source: 'search'
-          };
-        }
-        return f;
-      }));
-      return existing.id;
+    let next = facultyDatabase;
+    for (const record of records) {
+      const result = upsertFacultyRecord(next, record);
+      next = result.records;
+      if (result.created) {
+        summary.createdFacultyCount += 1;
+      } else if (result.merged) {
+        summary.mergedFacultyCount += 1;
+      }
+      summary.appendedProjectCount += result.appendedProjectCount;
     }
+    
+    setFacultyDatabase(next);
+    return summary;
+  };
 
-    const newId = crypto.randomUUID();
-    const newRecord: FacultyRecord = {
-      ...facultyToSave,
-      id: newId,
-      ...finalClassification,
-      classificationSource: extra?.classificationSource || 'auto',
-      addedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      source: 'search',
-      linkedClientIds: []
+  const syncWebResultsToDatabase = (
+    facultyMembers: FacultyMember[],
+    defaults?: { country?: string; fieldCategory?: string },
+  ) => {
+    const summary = {
+      createdFacultyCount: 0,
+      mergedFacultyCount: 0,
+      appendedProjectCount: 0,
     };
-    setFacultyDatabase(prev => [...prev, newRecord]);
-    return newId;
+
+    setFacultyDatabase((prev) => {
+      let next = prev;
+      for (const faculty of facultyMembers) {
+        const incomingRecord = buildFacultyRecordFromMember(faculty, {
+          manualCountry: defaults?.country,
+          manualField: defaults?.fieldCategory,
+          extra: { source: 'search' },
+        });
+        const result = upsertFacultyRecord(next, incomingRecord);
+        next = result.records;
+        if (result.created) {
+          summary.createdFacultyCount += 1;
+        } else if (result.merged) {
+          summary.mergedFacultyCount += 1;
+        }
+        summary.appendedProjectCount += result.appendedProjectCount;
+      }
+      return next;
+    });
+
+    return summary;
   };
 
   const updateFacultyRecord = (id: string, updates: Partial<FacultyRecord>) => {
-    setFacultyDatabase(prev => prev.map(f => 
-      f.id === id ? { ...f, ...updates, updatedAt: new Date().toISOString() } : f
-    ));
-  };
+    setFacultyDatabase(prev => prev.map(f => {
+      if (f.id !== id) {
+        return f;
+      }
 
-  const batchUpdateFacultyRecords = (ids: string[], updates: Partial<FacultyRecord>) => {
-    setFacultyDatabase(prev => prev.map(f => 
-      ids.includes(f.id) ? { ...f, ...updates, updatedAt: new Date().toISOString() } : f
-    ));
+      return normalizeFacultyRecord({
+        ...f,
+        ...updates,
+        id: f.id,
+        addedAt: f.addedAt,
+        updatedAt: new Date().toISOString(),
+        linkedClientIds: updates.linkedClientIds || f.linkedClientIds,
+        projects: updates.projects || f.projects,
+        legacy: updates.legacy || f.legacy,
+        raw: updates.raw || f.raw,
+      });
+    }));
   };
 
   const deleteFacultyRecord = (id: string) => {
@@ -540,25 +321,61 @@ function App() {
       if (client.linkedFacultyIds?.includes(id)) {
         return {
           ...client,
-          linkedFacultyIds: client.linkedFacultyIds.filter(fid => fid !== id)
+          linkedFacultyIds: client.linkedFacultyIds.filter(fid => fid !== id),
+          mentorRecommendations: (client.mentorRecommendations || []).filter((item) => item.facultyId !== id),
         };
       }
       return client;
     }));
     
     // Update selected client if needed
-    setSelectedClient(prev => {
-      if (prev?.linkedFacultyIds?.includes(id)) {
+    upsertSelectedClient((() => {
+      if (selectedClient?.linkedFacultyIds?.includes(id)) {
         return {
-          ...prev,
-          linkedFacultyIds: prev.linkedFacultyIds.filter(fid => fid !== id)
+          ...selectedClient,
+          linkedFacultyIds: selectedClient.linkedFacultyIds.filter(fid => fid !== id),
+          mentorRecommendations: (selectedClient.mentorRecommendations || []).filter((item) => item.facultyId !== id),
         };
       }
-      return prev;
-    });
+      return selectedClient;
+    })() as Client | null);
   };
 
-  const linkFacultyToClient = (facultyId: string, clientId: string) => {
+  const createRecommendation = (
+    facultyId: string,
+    sourceModes: SourceMode[],
+    addedFrom: RecommendationOrigin,
+    evaluation: MentorEvaluationSnapshot | undefined,
+    current: MentorRecommendation[] | undefined,
+  ): MentorRecommendation[] => {
+    const existing = current?.find((item) => item.facultyId === facultyId);
+    const next: MentorRecommendation = existing
+      ? {
+          ...existing,
+          sourceModes: Array.from(new Set([...(existing.sourceModes || []), ...sourceModes])) as SourceMode[],
+          addedFrom,
+          evaluation: evaluation || existing.evaluation,
+        }
+      : {
+          facultyId,
+          addedAt: new Date().toISOString(),
+          addedFrom,
+          sourceModes,
+          evaluation,
+        };
+
+    return [...(current || []).filter((item) => item.facultyId !== facultyId), next];
+  };
+
+  const linkFacultyToClient = (
+    facultyId: string,
+    clientId: string,
+    options?: { sourceModes?: SourceMode[]; addedFrom?: RecommendationOrigin; evaluation?: MentorEvaluationSnapshot },
+  ) => {
+    const sourceModes = (options?.sourceModes && options.sourceModes.length > 0 ? options.sourceModes : ['local']) as SourceMode[];
+    const addedFrom = options?.addedFrom || 'manual';
+    const evaluation = options?.evaluation;
+
     // 1. Update Faculty Record
     setFacultyDatabase(prev => prev.map(f => {
       if (f.id === facultyId) {
@@ -575,105 +392,30 @@ function App() {
       if (c.id === clientId) {
         const currentLinks = c.linkedFacultyIds || [];
         if (!currentLinks.includes(facultyId)) {
-          return { ...c, linkedFacultyIds: [...currentLinks, facultyId] };
+          return {
+            ...c,
+            linkedFacultyIds: [...currentLinks, facultyId],
+            mentorRecommendations: createRecommendation(facultyId, sourceModes, addedFrom, evaluation, c.mentorRecommendations),
+          };
         }
+        return {
+          ...c,
+          mentorRecommendations: createRecommendation(facultyId, sourceModes, addedFrom, evaluation, c.mentorRecommendations),
+        };
       }
       return c;
     }));
 
     // Update selected client if needed
-    setSelectedClient(prev => {
-      if (prev?.id === clientId) {
-        const currentLinks = prev.linkedFacultyIds || [];
-        if (!currentLinks.includes(facultyId)) {
-          return { ...prev, linkedFacultyIds: [...currentLinks, facultyId] };
-        }
-      }
-      return prev;
-    });
-  };
-
-  const reviewFacultyMatch = async (clientId: string, facultyId: string) => {
-    const client = clients.find(c => c.id === clientId);
-    const faculty = facultyDatabase.find(f => f.id === facultyId);
-    
-    if (!client || !faculty) return;
-    
-    // Construct student profile from client data
-    const studentProfile = `
-      姓名: ${client.name}
-      背景: ${client.academicAchievements || ''}
-      兴趣: ${client.interests || ''}
-      目标专业: ${client.targetDepartment || ''}
-      意向国家: ${client.targetCountries || ''}
-      特殊要求: ${client.specialRequirements || ''}
-    `;
-    
-    try {
-      const results = await scoreFacultyFromDatabase(studentProfile, client.targetDepartment || '', [faculty]);
-      const scoredFaculty = results[0];
-      
-      if (scoredFaculty) {
-        const match: FacultyMatch = {
-          facultyId: facultyId,
-          matchScore: scoredFaculty.matchScore,
-          matchReasoning: scoredFaculty.alignmentDetails,
-          reviewedAt: new Date().toISOString()
-        };
-        
-        const updateClient = (c: Client) => {
-          const existingMatches = c.facultyMatches || [];
-          const filteredMatches = existingMatches.filter(m => m.facultyId !== facultyId);
-          return { ...c, facultyMatches: [...filteredMatches, match] };
-        };
-
-        setClients(prev => prev.map(c => c.id === clientId ? updateClient(c) : c));
-        setSelectedClient(prev => prev?.id === clientId ? updateClient(prev) : prev);
-      }
-    } catch (error) {
-      console.error("Failed to review faculty match:", error);
-    }
-  };
-
-  const batchReviewFacultyMatches = async (clientId: string, facultyIds: string[]) => {
-    const client = clients.find(c => c.id === clientId);
-    const faculties = facultyDatabase.filter(f => facultyIds.includes(f.id));
-    
-    if (!client || faculties.length === 0) return;
-    
-    const studentProfile = `
-      姓名: ${client.name}
-      背景: ${client.academicAchievements || ''}
-      兴趣: ${client.interests || ''}
-      目标专业: ${client.targetDepartment || ''}
-      意向国家: ${client.targetCountries || ''}
-      特殊要求: ${client.specialRequirements || ''}
-    `;
-    
-    try {
-      const results = await scoreFacultyFromDatabase(studentProfile, client.targetDepartment || '', faculties);
-      
-      const newMatches: FacultyMatch[] = results.map((scored, index) => {
-        const originalFaculty = faculties[index];
-        return {
-          facultyId: originalFaculty.id,
-          matchScore: scored.matchScore || 0,
-          matchReasoning: scored.alignmentDetails,
-          reviewedAt: new Date().toISOString()
-        };
-      });
-      
-      const updateClient = (c: Client) => {
-        const existingMatches = c.facultyMatches || [];
-        const filteredMatches = existingMatches.filter(m => !facultyIds.includes(m.facultyId));
-        return { ...c, facultyMatches: [...filteredMatches, ...newMatches] };
-      };
-
-      setClients(prev => prev.map(c => c.id === clientId ? updateClient(c) : c));
-      setSelectedClient(prev => prev?.id === clientId ? updateClient(prev) : prev);
-    } catch (error) {
-      console.error("Failed to batch review faculty matches:", error);
-    }
+    upsertSelectedClient(
+      selectedClient?.id === clientId
+        ? normalizeClient({
+            ...selectedClient,
+            linkedFacultyIds: Array.from(new Set([...(selectedClient.linkedFacultyIds || []), facultyId])),
+            mentorRecommendations: createRecommendation(facultyId, sourceModes, addedFrom, evaluation, selectedClient.mentorRecommendations),
+          } as Client)
+        : selectedClient,
+    );
   };
 
   const unlinkFacultyFromClient = (facultyId: string, clientId: string) => {
@@ -688,21 +430,35 @@ function App() {
     // 2. Update Client Record
     setClients(prev => prev.map(c => {
       if (c.id === clientId) {
-        return { ...c, linkedFacultyIds: (c.linkedFacultyIds || []).filter(fid => fid !== facultyId) };
+        return {
+          ...c,
+          linkedFacultyIds: (c.linkedFacultyIds || []).filter(fid => fid !== facultyId),
+          mentorRecommendations: (c.mentorRecommendations || []).filter((item) => item.facultyId !== facultyId),
+        };
       }
       return c;
     }));
 
     // Update selected client if needed
-    setSelectedClient(prev => {
-      if (prev?.id === clientId) {
-        return {
-          ...prev,
-          linkedFacultyIds: (prev.linkedFacultyIds || []).filter(fid => fid !== facultyId)
-        };
-      }
-      return prev;
-    });
+    upsertSelectedClient(
+      selectedClient?.id === clientId
+        ? normalizeClient({
+            ...selectedClient,
+            linkedFacultyIds: (selectedClient.linkedFacultyIds || []).filter((id) => id !== facultyId),
+            mentorRecommendations: (selectedClient.mentorRecommendations || []).filter((item) => item.facultyId !== facultyId),
+          } as Client)
+        : selectedClient,
+    );
+  };
+
+  const batchAddFacultyToDatabase = (items: FacultyRecord[]) => {
+    setFacultyDatabase(prev => [...prev, ...items]);
+  };
+
+  const batchUpdateFacultyRecords = (ids: string[], updates: Partial<FacultyRecord>) => {
+    setFacultyDatabase(prev => prev.map(f => 
+      ids.includes(f.id) ? { ...f, ...updates, updatedAt: new Date().toISOString() } : f
+    ));
   };
 
   const saveDocument = (clientId: string, document: { id?: string; title: string; type: string; content: string }) => {
@@ -835,8 +591,6 @@ function App() {
               facultyDatabase={facultyDatabase}
               onLinkFacultyToClient={linkFacultyToClient}
               onUnlinkFacultyFromClient={unlinkFacultyFromClient}
-              onReviewMatch={reviewFacultyMatch}
-              onBatchReviewMatch={batchReviewFacultyMatches}
             />
           </div>
         )}
@@ -874,6 +628,7 @@ function App() {
             clients={clients}
             onAddFaculty={addFacultyToDatabase}
             onBatchAddFaculty={batchAddFacultyToDatabase}
+            onImportFacultyRecords={importFacultyRecords}
             onUpdateFaculty={updateFacultyRecord}
             onBatchUpdateFaculty={batchUpdateFacultyRecords}
             onDeleteFaculty={deleteFacultyRecord}

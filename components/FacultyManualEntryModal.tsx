@@ -45,22 +45,9 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
     profileUrl: '',
     tuition: '',
     scholarship: '',
-    // Detailed Requirements
-    ieltsTotal: '',
-    ieltsReading: '',
-    ieltsListening: '',
-    ieltsSpeaking: '',
-    ieltsWriting: '',
-    toeflTotal: '',
-    toeflReading: '',
-    toeflListening: '',
-    toeflSpeaking: '',
-    toeflWriting: '',
-    degreeAndGrades: '',
-    greGmat: '',
-    otherMaterials: '',
-    // System info
     country: '',
+    provinceState: '',
+    city: '',
     fieldCategory: '',
     subFieldCategory: '',
     subRegion: '',
@@ -94,32 +81,11 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
       photoUrl: form.photoUrl,
       programUrl: form.programUrl,
       qsRanking: form.qsRanking,
-      deadlineData: [{ value: form.deadline, sourceUrl: '' }],
-      applicationReqsData: [{ value: form.applicationReqs, sourceUrl: '' }],
-      rpReqsData: [{ value: form.rpReqs, sourceUrl: '' }],
-      tuitionData: [{ value: form.tuition, sourceUrl: '' }],
-      scholarshipData: [{ value: form.scholarship, sourceUrl: '' }],
-      detailedRequirements: {
-        ielts: {
-          total: form.ieltsTotal,
-          reading: form.ieltsReading,
-          listening: form.ieltsListening,
-          speaking: form.ieltsSpeaking,
-          writing: form.ieltsWriting,
-          sourceUrl: ''
-        },
-        toefl: {
-          total: form.toeflTotal,
-          reading: form.toeflReading,
-          listening: form.toeflListening,
-          speaking: form.toeflSpeaking,
-          writing: form.toeflWriting,
-          sourceUrl: ''
-        },
-        degreeAndGrades: { value: form.degreeAndGrades, sourceUrl: '' },
-        greGmat: { value: form.greGmat, sourceUrl: '' },
-        otherMaterials: { value: form.otherMaterials, sourceUrl: '' }
-      },
+      deadlineData: { value: form.deadline, sourceUrl: '' },
+      applicationReqsData: { value: form.applicationReqs, sourceUrl: '' },
+      rpReqsData: { value: form.rpReqs, sourceUrl: '' },
+      tuitionData: { value: form.tuition, sourceUrl: '' },
+      scholarshipData: { value: form.scholarship, sourceUrl: '' },
       researchAreas: form.researchAreas.split(/[,，]/).map(s => s.trim()).filter(Boolean),
       recentActivities: [],
       activitySummary: '',
@@ -140,7 +106,9 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
 
     const extra: Partial<FacultyRecord> = {
       subFieldCategory: form.subFieldCategory,
-      subRegion: form.subRegion,
+      provinceState: form.provinceState,
+      city: form.city,
+      subRegion: form.provinceState, // For backward compatibility with existing subRegion filters
       regionPath: form.regionPath.split(/[>|/]/).map(s => s.trim()).filter(Boolean),
       classificationPath: form.classificationPath.split(/[>|/]/).map(s => s.trim()).filter(Boolean),
       classificationNote: form.classificationNote,
@@ -169,26 +137,15 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
       tuition: '',
       scholarship: '',
       country: '',
+      provinceState: '',
+      city: '',
       fieldCategory: '',
       subFieldCategory: '',
       subRegion: '',
       regionPath: '',
       classificationPath: '',
       classificationNote: '',
-      photoUrl: '',
-      ieltsTotal: '',
-      ieltsReading: '',
-      ieltsListening: '',
-      ieltsSpeaking: '',
-      ieltsWriting: '',
-      toeflTotal: '',
-      toeflReading: '',
-      toeflListening: '',
-      toeflSpeaking: '',
-      toeflWriting: '',
-      degreeAndGrades: '',
-      greGmat: '',
-      otherMaterials: ''
+      photoUrl: ''
     });
   };
 
@@ -342,57 +299,6 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
               onChange={v => setForm({...form, scholarship: v})} 
               placeholder="例如: Full funding available" 
             />
-            <div className="col-span-2 border-t border-gray-200 pt-6 mt-2">
-              <h4 className="text-sm font-bold text-indigo-600 mb-4 flex items-center gap-2">
-                <GraduationCap size={18} />
-                详细招生要求 (语言/成绩)
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4 p-4 bg-indigo-50/30 rounded-2xl border border-indigo-100">
-                  <h5 className="text-xs font-black text-indigo-500 uppercase tracking-widest">IELTS 雅思要求</h5>
-                  <div className="grid grid-cols-5 gap-2">
-                    <InputField label="总分" value={form.ieltsTotal} onChange={v => setForm({...form, ieltsTotal: v})} />
-                    <InputField label="阅读" value={form.ieltsReading} onChange={v => setForm({...form, ieltsReading: v})} />
-                    <InputField label="听力" value={form.ieltsListening} onChange={v => setForm({...form, ieltsListening: v})} />
-                    <InputField label="口语" value={form.ieltsSpeaking} onChange={v => setForm({...form, ieltsSpeaking: v})} />
-                    <InputField label="写作" value={form.ieltsWriting} onChange={v => setForm({...form, ieltsWriting: v})} />
-                  </div>
-                </div>
-                <div className="space-y-4 p-4 bg-blue-50/30 rounded-2xl border border-blue-100">
-                  <h5 className="text-xs font-black text-blue-500 uppercase tracking-widest">TOEFL 托福要求</h5>
-                  <div className="grid grid-cols-5 gap-2">
-                    <InputField label="总分" value={form.toeflTotal} onChange={v => setForm({...form, toeflTotal: v})} />
-                    <InputField label="阅读" value={form.toeflReading} onChange={v => setForm({...form, toeflReading: v})} />
-                    <InputField label="听力" value={form.toeflListening} onChange={v => setForm({...form, toeflListening: v})} />
-                    <InputField label="口语" value={form.toeflSpeaking} onChange={v => setForm({...form, toeflSpeaking: v})} />
-                    <InputField label="写作" value={form.toeflWriting} onChange={v => setForm({...form, toeflWriting: v})} />
-                  </div>
-                </div>
-                <div className="col-span-2">
-                  <InputField 
-                    label="学位与成绩要求" 
-                    icon={BookOpen} 
-                    value={form.degreeAndGrades} 
-                    onChange={v => setForm({...form, degreeAndGrades: v})} 
-                    placeholder="例如: 2:1 honours degree or equivalent (75%+)" 
-                  />
-                </div>
-                <InputField 
-                  label="GRE / GMAT" 
-                  icon={BookOpen} 
-                  value={form.greGmat} 
-                  onChange={v => setForm({...form, greGmat: v})} 
-                  placeholder="例如: GRE required (320+)" 
-                />
-                <InputField 
-                  label="其他申请材料" 
-                  icon={BookOpen} 
-                  value={form.otherMaterials} 
-                  onChange={v => setForm({...form, otherMaterials: v})} 
-                  placeholder="例如: Portfolio, Writing Sample" 
-                />
-              </div>
-            </div>
             <div className="col-span-2 border-t border-gray-200 pt-4 mt-2">
               <h4 className="text-sm font-bold text-gray-700 mb-4">分类与系统信息 (可选)</h4>
               <div className="grid grid-cols-2 gap-6">
@@ -404,11 +310,18 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
                   placeholder="例如: 美国" 
                 />
                 <InputField 
-                  label="二级地区 (如: 北京)" 
+                  label="省 / 州" 
                   icon={MapPin} 
-                  value={form.subRegion} 
-                  onChange={v => setForm({...form, subRegion: v})} 
-                  placeholder="例如: 北京" 
+                  value={form.provinceState} 
+                  onChange={v => setForm({...form, provinceState: v})} 
+                  placeholder="例如: 加利福尼亚州" 
+                />
+                <InputField 
+                  label="城市" 
+                  icon={MapPin} 
+                  value={form.city} 
+                  onChange={v => setForm({...form, city: v})} 
+                  placeholder="例如: 洛杉矶" 
                 />
                 <InputField 
                   label="地区路径 (用 &gt; 分隔)" 

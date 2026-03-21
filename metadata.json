@@ -1,5 +1,5 @@
 {
-  "name": "Copy of ScholarSync",
-  "description": "An AI-powered academic suite featuring intelligent faculty matching, high-fidelity image generation, and rapid-response assistance.",
+  "name": "ScholarSync - 智能留学导师库管理系统",
+  "description": "集成了 Gemini AI 的智能导师库管理系统，支持多级联动筛选、AI 智能匹配与文书工作台。",
   "requestFramePermissions": []
 }

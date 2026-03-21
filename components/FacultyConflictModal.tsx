@@ -3,7 +3,7 @@ import { X, AlertTriangle } from 'lucide-react';
 import { FacultyMember, FacultyRecord } from '../types';
 
 interface Conflict {
-  newItem: { faculty: FacultyMember, country: string, fieldCategory: string };
+  newItem: FacultyRecord;
   existingItem: FacultyRecord;
   changes: { field: string, old: any, new: any }[];
 }
@@ -11,9 +11,9 @@ interface Conflict {
 interface FacultyConflictModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (itemsToImport: { faculty: FacultyMember, country: string, fieldCategory: string }[]) => void;
+  onConfirm: (itemsToImport: FacultyRecord[]) => void;
   conflicts: Conflict[];
-  allItems: { faculty: FacultyMember, country: string, fieldCategory: string }[];
+  allItems: FacultyRecord[];
 }
 
 const FacultyConflictModal: React.FC<FacultyConflictModalProps> = ({
@@ -42,7 +42,7 @@ const FacultyConflictModal: React.FC<FacultyConflictModalProps> = ({
           <div className="space-y-4">
             {conflicts.map((conflict, index) => (
               <div key={index} className="border border-gray-100 rounded-2xl p-4 bg-gray-50/50">
-                <h3 className="font-bold text-gray-900 mb-2">{conflict.newItem.faculty.name} ({conflict.newItem.faculty.university})</h3>
+                <h3 className="font-bold text-gray-900 mb-2">{conflict.newItem.name} ({conflict.newItem.university})</h3>
                 <ul className="text-sm text-gray-600 space-y-1">
                   {conflict.changes.map((change, cIndex) => (
                     <li key={cIndex}>
