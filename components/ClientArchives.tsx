@@ -13,7 +13,8 @@ import {
   Upload,
   CheckSquare,
   Square,
-  Trash2
+  Trash2,
+  X
 } from 'lucide-react';
 import CreateClientModal from './CreateClientModal';
 import { Client } from '../types';
@@ -41,6 +42,9 @@ const ClientArchives: React.FC<ClientArchivesProps> = ({
   const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBatchDeleteModalOpen, setIsBatchDeleteModalOpen] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
   const filteredClients = clients.filter(c => c.status === activeTab);
 
@@ -63,14 +67,32 @@ const ClientArchives: React.FC<ClientArchivesProps> = ({
     setSelectedIds(newSet);
   };
 
-  const handleBatchDelete = () => {
+  const handleBatchDelete = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (selectedIds.size === 0) return;
-    if (window.confirm(`确定要删除选中的 ${selectedIds.size} 位客户吗？此操作无法撤销。`)) {
-      selectedIds.forEach(id => {
-        console.log('Deleting client:', id);
-        onDeleteClient?.(id);
-      });
-      setSelectedIds(new Set());
+    setIsBatchDeleteModalOpen(true);
+  };
+
+  const confirmBatchDelete = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    selectedIds.forEach(id => {
+      console.log('Deleting client:', id);
+      onDeleteClient?.(id);
+    });
+    setSelectedIds(new Set());
+    setIsBatchDeleteModalOpen(false);
+  };
+
+  const confirmSingleDelete = () => {
+    if (deleteTargetId) {
+      onDeleteClient?.(deleteTargetId);
+      setDeleteTargetId(null);
     }
   };
 
@@ -86,7 +108,7 @@ const ClientArchives: React.FC<ClientArchivesProps> = ({
   };
 
   const handleExportJSON = () => {
-    window.alert('正在导出客户信息...');
+    setAlertMessage('正在导出客户信息...');
     const targetClients = selectedIds.size > 0 
       ? clients.filter(c => selectedIds.has(c.id))
       : filteredClients;
@@ -120,19 +142,19 @@ const ClientArchives: React.FC<ClientArchivesProps> = ({
         const importedClients = Array.isArray(data) ? data : [data];
         
         if (importedClients.length === 0) {
-          window.alert('文件内容为空');
+          setAlertMessage('文件内容为空');
           return;
         }
 
         if (onBatchAddClients) {
           onBatchAddClients(importedClients);
-          window.alert(`成功导入 ${importedClients.length} 位客户`);
+          setAlertMessage(`成功导入 ${importedClients.length} 位客户`);
         } else {
           console.error('onBatchAddClients callback is missing');
         }
       } catch (err) {
         console.error('Import failed:', err);
-        window.alert('导入失败：文件格式不正确或内容损坏');
+        setAlertMessage('导入失败：文件格式不正确或内容损坏');
       }
     };
     reader.readAsText(file);
@@ -303,11 +325,7 @@ const ClientArchives: React.FC<ClientArchivesProps> = ({
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          window.alert('点击了删除按钮: ' + client.id);
-                          if (window.confirm('确定要删除该客户吗？此操作无法撤销。')) {
-                            console.log('Individual delete client:', client.id);
-                            onDeleteClient?.(client.id);
-                          }
+                          setDeleteTargetId(client.id);
                         }}
                         className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
                         title="删除客户"
@@ -339,10 +357,7 @@ const ClientArchives: React.FC<ClientArchivesProps> = ({
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (window.confirm('确定要删除该客户吗？此操作无法撤销。')) {
-                            console.log('Individual delete client (list):', client.id);
-                            onDeleteClient?.(client.id);
-                          }
+                          setDeleteTargetId(client.id);
                         }}
                         className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
                         title="删除客户"
@@ -387,6 +402,92 @@ const ClientArchives: React.FC<ClientArchivesProps> = ({
         onClose={() => setIsModalOpen(false)} 
         onConfirm={onAddClient}
       />
+      {/* Batch Delete Confirmation Modal */}
+      {isBatchDeleteModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h2 className="text-xl font-bold text-gray-900">确认删除</h2>
+              <button onClick={() => setIsBatchDeleteModalOpen(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                <X size={20} className="text-gray-400" />
+              </button>
+            </div>
+            <div className="p-8">
+              <p className="text-gray-600">确定要删除选中的 <span className="font-bold text-red-600">{selectedIds.size}</span> 位客户吗？此操作无法撤销。</p>
+            </div>
+            <div className="px-8 py-6 border-t border-gray-100 flex justify-end gap-4 bg-gray-50/50">
+              <button 
+                onClick={() => setIsBatchDeleteModalOpen(false)}
+                className="px-6 py-2.5 text-sm font-bold text-gray-600 hover:bg-white/60 rounded-xl transition-all active:scale-95"
+              >
+                取消
+              </button>
+              <button 
+                onClick={confirmBatchDelete}
+                className="px-6 py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-700 shadow-md shadow-red-500/20 transition-all active:scale-95"
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Single Delete Confirmation Modal */}
+      {deleteTargetId && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h2 className="text-xl font-bold text-gray-900">确认删除</h2>
+              <button onClick={() => setDeleteTargetId(null)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                <X size={20} className="text-gray-400" />
+              </button>
+            </div>
+            <div className="p-8">
+              <p className="text-gray-600">确定要删除该客户吗？此操作无法撤销。</p>
+            </div>
+            <div className="px-8 py-6 border-t border-gray-100 flex justify-end gap-4 bg-gray-50/50">
+              <button 
+                onClick={() => setDeleteTargetId(null)}
+                className="px-6 py-2.5 text-sm font-bold text-gray-600 hover:bg-white/60 rounded-xl transition-all active:scale-95"
+              >
+                取消
+              </button>
+              <button 
+                onClick={confirmSingleDelete}
+                className="px-6 py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-700 shadow-md shadow-red-500/20 transition-all active:scale-95"
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alert Modal */}
+      {alertMessage && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h2 className="text-xl font-bold text-gray-900">提示</h2>
+              <button onClick={() => setAlertMessage(null)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                <X size={20} className="text-gray-400" />
+              </button>
+            </div>
+            <div className="p-8">
+              <p className="text-gray-600">{alertMessage}</p>
+            </div>
+            <div className="px-8 py-6 border-t border-gray-100 flex justify-end bg-gray-50/50">
+              <button 
+                onClick={() => setAlertMessage(null)}
+                className="px-8 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all active:scale-95"
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -37,7 +37,8 @@ import {
   UserPlus,
   ArchiveRestore,
   Upload,
-  CheckCircle2
+  CheckCircle2,
+  Loader2
 } from 'lucide-react';
 import { Client, FacultyRecord, ClientEvent } from '../types';
 import FacultyCard from './FacultyCard';
@@ -52,6 +53,8 @@ interface ClientDetailProps {
   facultyDatabase?: FacultyRecord[];
   onLinkFacultyToClient?: (facultyId: string, clientId: string) => void;
   onUnlinkFacultyFromClient?: (facultyId: string, clientId: string) => void;
+  onReviewMatch?: (clientId: string, facultyId: string) => Promise<void>;
+  onBatchReviewMatch?: (clientId: string, facultyIds: string[]) => Promise<void>;
   onDeleteClient?: (clientId: string) => void;
 }
 
@@ -129,14 +132,20 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
   facultyDatabase = [],
   onLinkFacultyToClient,
   onUnlinkFacultyFromClient,
+  onReviewMatch,
+  onBatchReviewMatch,
   onDeleteClient
 }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'documents' | 'mentors'>(initialTab);
+  const [reviewingFacultyId, setReviewingFacultyId] = useState<string | null>(null);
+  const [isBatchReviewing, setIsBatchReviewing] = useState(false);
   const [showWritingMenu, setShowWritingMenu] = useState(false);
   const [showContactMenu, setShowContactMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showAddInfoMenu, setShowAddInfoMenu] = useState(false);
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'client' | 'document' | 'event', id?: string } | null>(null);
   const [basicInfoForm, setBasicInfoForm] = useState({ name: client.name, advisor: client.advisor || '', gpa: client.gpa || '' });
 
   // Form states
@@ -193,6 +202,26 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const handleReviewMatch = async (facultyId: string) => {
+    if (!onReviewMatch) return;
+    setReviewingFacultyId(facultyId);
+    try {
+      await onReviewMatch(client.id, facultyId);
+    } finally {
+      setReviewingFacultyId(null);
+    }
+  };
+
+  const handleBatchReview = async () => {
+    if (!onBatchReviewMatch || !client.linkedFacultyIds || client.linkedFacultyIds.length === 0) return;
+    setIsBatchReviewing(true);
+    try {
+      await onBatchReviewMatch(client.id, client.linkedFacultyIds);
+    } finally {
+      setIsBatchReviewing(false);
+    }
+  };
 
   const handleUpdateBasicInfo = () => {
     onUpdateClient({
@@ -268,7 +297,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
 
   const handleSaveEvent = () => {
     if (!eventForm.title || !eventForm.date) {
-      alert('请输入标题和日期');
+      setAlertMessage('请输入标题和日期');
       return;
     }
     
@@ -301,13 +330,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
   };
 
   const handleDeleteEvent = (eventId: string) => {
-    if (confirm('确定要删除该事件吗？')) {
-      const updatedEvents = (client.events || []).filter(e => e.id !== eventId);
-      onUpdateClient({
-        ...client,
-        events: updatedEvents
-      });
-    }
+    setDeleteTarget({ type: 'event', id: eventId });
   };
 
   const handleToggleEventComplete = (eventId: string) => {
@@ -373,11 +396,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
   };
 
   const handleDeleteClient = () => {
-    if (window.confirm('确定要删除该客户吗？此操作无法撤销。')) {
-      console.log('Deleting client from detail view:', client.id);
-      onDeleteClient?.(client.id);
-      onBack();
-    }
+    setDeleteTarget({ type: 'client' });
     setShowMoreMenu(false);
   };
 
@@ -393,10 +412,28 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
   };
 
   const handleDeleteDocument = (docId: string) => {
-    if (confirm('确定要删除该文档吗？此操作无法撤销。')) {
-      const updatedDocs = client.documents?.filter(d => d.id !== docId) || [];
+    setDeleteTarget({ type: 'document', id: docId });
+  };
+
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+
+    if (deleteTarget.type === 'client') {
+      console.log('Deleting client from detail view:', client.id);
+      onDeleteClient?.(client.id);
+      onBack();
+    } else if (deleteTarget.type === 'document' && deleteTarget.id) {
+      const updatedDocs = client.documents?.filter(d => d.id !== deleteTarget.id) || [];
       onUpdateClient({ ...client, documents: updatedDocs });
+    } else if (deleteTarget.type === 'event' && deleteTarget.id) {
+      const updatedEvents = (client.events || []).filter(e => e.id !== deleteTarget.id);
+      onUpdateClient({
+        ...client,
+        events: updatedEvents
+      });
     }
+
+    setDeleteTarget(null);
   };
 
   const scrollToSection = (ref: React.RefObject<HTMLDivElement>) => {
@@ -1185,20 +1222,55 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
         {activeTab === 'mentors' && (
           <div className="space-y-6">
             {client.linkedFacultyIds && client.linkedFacultyIds.length > 0 ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {facultyDatabase
-                  .filter(f => client.linkedFacultyIds?.includes(f.id))
-                  .map(faculty => (
-                    <FacultyCard
-                      key={faculty.id}
-                      prof={faculty}
-                      isDatabaseView={true}
-                      isLinked={true}
-                      onUnlink={() => onUnlinkFacultyFromClient?.(faculty.id, client.id)}
-                      linkedClientCount={faculty.linkedClientIds?.length || 0}
-                    />
-                  ))}
-              </div>
+              <>
+                <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-500">
+                      <Users size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-900">推荐导师库</h3>
+                      <p className="text-xs text-gray-400">已为该学生推荐 {client.linkedFacultyIds.length} 位导师</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={handleBatchReview}
+                    disabled={isBatchReviewing}
+                    className="flex items-center gap-2 px-6 py-2.5 bg-emerald-500 text-white rounded-xl text-sm font-bold hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100 active:scale-95 disabled:opacity-50"
+                  >
+                    {isBatchReviewing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>正在分析匹配度...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={16} />
+                        <span>一键分析所有匹配度</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {facultyDatabase
+                    .filter(f => client.linkedFacultyIds?.includes(f.id))
+                    .map(faculty => (
+                      <FacultyCard
+                        key={faculty.id}
+                        prof={faculty}
+                        isDatabaseView={true}
+                        isLinked={true}
+                        onUnlink={() => onUnlinkFacultyFromClient?.(faculty.id, client.id)}
+                        onReviewMatch={() => handleReviewMatch(faculty.id)}
+                        isReviewing={reviewingFacultyId === faculty.id}
+                        studentMatchScore={client.facultyMatches?.find(m => m.facultyId === faculty.id)?.matchScore}
+                        studentMatchReasoning={client.facultyMatches?.find(m => m.facultyId === faculty.id)?.matchReasoning}
+                        linkedClientCount={faculty.linkedClientIds?.length || 0}
+                      />
+                    ))}
+                </div>
+              </>
             ) : (
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm min-h-[400px] flex flex-col items-center justify-center p-12 text-center">
                 <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center text-gray-300 mb-6">
@@ -1536,6 +1608,64 @@ const ClientDetail: React.FC<ClientDetailProps> = ({
           </p>
         </div>
       </Modal>
+
+      {/* Alert Modal */}
+      {alertMessage && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h2 className="text-xl font-bold text-gray-900">提示</h2>
+              <button onClick={() => setAlertMessage(null)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                <X size={20} className="text-gray-400" />
+              </button>
+            </div>
+            <div className="p-8">
+              <p className="text-gray-600">{alertMessage}</p>
+            </div>
+            <div className="px-8 py-6 border-t border-gray-100 flex justify-end bg-gray-50/50">
+              <button 
+                onClick={() => setAlertMessage(null)}
+                className="px-8 py-2.5 bg-cyan-500 text-white rounded-xl text-sm font-bold hover:bg-cyan-600 shadow-md shadow-cyan-500/20 transition-all active:scale-95"
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirm Modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h2 className="text-xl font-bold text-gray-900">确认删除</h2>
+              <button onClick={() => setDeleteTarget(null)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                <X size={20} className="text-gray-400" />
+              </button>
+            </div>
+            <div className="p-8">
+              <p className="text-gray-600">
+                确定要删除该{deleteTarget.type === 'client' ? '客户' : deleteTarget.type === 'document' ? '文档' : '事件'}吗？此操作无法撤销。
+              </p>
+            </div>
+            <div className="px-8 py-6 border-t border-gray-100 flex justify-end bg-gray-50/50 space-x-3">
+              <button 
+                onClick={() => setDeleteTarget(null)}
+                className="px-6 py-2.5 rounded-xl text-sm font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+              >
+                取消
+              </button>
+              <button 
+                onClick={confirmDelete}
+                className="px-8 py-2.5 bg-red-500 text-white rounded-xl text-sm font-bold hover:bg-red-600 shadow-md shadow-red-500/20 transition-all active:scale-95"
+              >
+                确定删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { X, Search, Loader2, Plus, Check } from 'lucide-react';
+import { X, Search, Loader2, Plus, Check, Link } from 'lucide-react';
 import { FacultyMember } from '../types';
-import { searchFacultyByWeb } from '../services/geminiService';
+import { searchFacultyByWeb, searchFacultyByDirectoryUrl } from '../services/geminiService';
 import FacultyCard from './FacultyCard';
 
 interface FacultySearchModalProps {
@@ -11,23 +11,38 @@ interface FacultySearchModalProps {
 }
 
 const FacultySearchModal: React.FC<FacultySearchModalProps> = ({ isOpen, onClose, onImport }) => {
+  const [mode, setMode] = useState<'keyword' | 'url'>('keyword');
   const [query, setQuery] = useState('');
+  const [url, setUrl] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<FacultyMember[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
 
   if (!isOpen) return null;
 
   const handleSearch = async () => {
-    if (!query.trim()) return;
+    if (mode === 'keyword' && !query.trim()) return;
+    if (mode === 'url' && !url.trim()) return;
+
     setIsSearching(true);
+    setError(null);
     setResults([]);
     setSelectedIndices([]);
     try {
-      const data = await searchFacultyByWeb(query);
+      let data: FacultyMember[] = [];
+      if (mode === 'keyword') {
+        data = await searchFacultyByWeb(query);
+      } else {
+        data = await searchFacultyByDirectoryUrl(url);
+      }
       setResults(data);
-    } catch (error) {
-      console.error("Search failed", error);
+      if (data.length === 0) {
+        setError("未找到相关导师，请尝试更换关键词或检查 API Key 权限。");
+      }
+    } catch (err: any) {
+      console.error("Search failed", err);
+      setError(err.message || "搜索失败，请检查网络或 API Key 配置。");
     } finally {
       setIsSearching(false);
     }
@@ -63,29 +78,59 @@ const FacultySearchModal: React.FC<FacultySearchModalProps> = ({ isOpen, onClose
 
         {/* Search Bar */}
         <div className="p-6 border-b border-white/50 bg-white/30 backdrop-blur-sm">
+          <div className="flex space-x-2 mb-4">
+            <button 
+              onClick={() => setMode('keyword')}
+              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${mode === 'keyword' ? 'bg-blue-600 text-white shadow-md' : 'bg-white/50 text-gray-600 hover:bg-white'}`}
+            >
+              关键词搜索
+            </button>
+            <button 
+              onClick={() => setMode('url')}
+              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${mode === 'url' ? 'bg-blue-600 text-white shadow-md' : 'bg-white/50 text-gray-600 hover:bg-white'}`}
+            >
+              导师列表 URL 导入
+            </button>
+          </div>
+          
           <div className="flex space-x-4">
             <div className="flex-1 relative">
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                placeholder="输入导师姓名、学校或研究方向 (例如: 'Stanford CS Professors in AI')"
-                className="w-full pl-10 pr-4 py-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/30 focus:border-transparent transition-all shadow-sm font-medium"
-              />
-              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              {mode === 'keyword' ? (
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                  placeholder="输入导师姓名、学校或研究方向 (例如: 'Stanford CS Professors in AI')"
+                  className="w-full pl-10 pr-4 py-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/30 focus:border-transparent transition-all shadow-sm font-medium"
+                />
+              ) : (
+                <input
+                  type="url"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                  placeholder="输入学院导师列表页面 URL"
+                  className="w-full pl-10 pr-4 py-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/30 focus:border-transparent transition-all shadow-sm font-medium"
+                />
+              )}
+              {mode === 'keyword' ? (
+                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              ) : (
+                <Link size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              )}
             </div>
             <button
               onClick={handleSearch}
-              disabled={isSearching || !query.trim()}
+              disabled={isSearching || (mode === 'keyword' ? !query.trim() : !url.trim())}
               className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl text-sm font-bold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center active:scale-95"
             >
               {isSearching ? <Loader2 size={18} className="animate-spin mr-2" /> : <Search size={18} className="mr-2" />}
-              {isSearching ? '搜索中...' : '搜索'}
+              {isSearching ? '检索中...' : '开始检索'}
             </button>
           </div>
           <p className="mt-2 text-xs text-gray-500 font-medium">
-            * 使用 Google Search Grounding 技术，实时检索全网最新导师信息
+            * {mode === 'keyword' ? '使用 Google Search Grounding 技术，实时检索全网最新导师信息' : '使用 URL Context 技术，直接从提供的页面提取导师信息'}
           </p>
         </div>
 
@@ -95,6 +140,12 @@ const FacultySearchModal: React.FC<FacultySearchModalProps> = ({ isOpen, onClose
             <div className="h-full flex flex-col items-center justify-center text-gray-400">
               <Loader2 size={40} className="animate-spin mb-4 text-blue-600" />
               <p className="text-sm font-medium">正在全网检索导师信息，请稍候...</p>
+            </div>
+          ) : error ? (
+            <div className="h-full flex flex-col items-center justify-center text-red-500/80">
+              <X size={48} className="mb-4 opacity-50" />
+              <p className="text-sm font-medium text-center max-w-md">{error}</p>
+              <p className="mt-2 text-xs text-gray-500">提示：Google Search Grounding 功能通常需要付费版 API Key。</p>
             </div>
           ) : results.length > 0 ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

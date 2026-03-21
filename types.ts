@@ -14,6 +14,29 @@ export interface SourceData {
     sourceUrl: string;
 }
 
+export interface LanguageScore {
+  total: string;
+  reading?: string;
+  listening?: string;
+  speaking?: string;
+  writing?: string;
+  sourceUrl?: string;
+}
+
+export interface AdmissionRequirements {
+  ielts?: LanguageScore;
+  toefl?: LanguageScore;
+  degreeAndGrades?: SourceData;
+  greGmat?: SourceData;
+  otherMaterials?: SourceData;
+}
+
+export interface DeadlineRound {
+  roundName: string;
+  date: string;
+  sourceUrl?: string;
+}
+
 export interface FacultyMember {
   name: string;
   title: string;
@@ -35,17 +58,20 @@ export interface FacultyMember {
   // Admission & Data Fields with Source
   qsRanking?: string;         // 2026QS综合排名
   qsRankingData?: SourceData;
-  deadlineData?: SourceData;  // 申请截止日期
-  applicationReqsData?: SourceData; // 申请要求及材料
-  rpReqsData?: SourceData;    // RP字数要求
-  tuitionData?: SourceData;   // 学费
-  scholarshipData?: SourceData; // 奖学金项目
+  deadlineData?: SourceData[];  // 申请截止日期 (支持多来源)
+  structuredDeadlines?: DeadlineRound[]; // 结构化截止日期 (多轮)
+  applicationReqsData?: SourceData[]; // 申请要求及材料 (支持多来源)
+  detailedRequirements?: AdmissionRequirements; // 详细申请要求 (雅思、托福等)
+  rpReqsData?: SourceData[];    // RP字数要求 (支持多来源)
+  tuitionData?: SourceData[];   // 学费 (支持多来源)
+  scholarshipData?: SourceData[]; // 奖学金项目 (支持多来源)
   
   programUrl?: string;        // 专业链接
   universityUrl?: string;     // 学校官网
   
   recommendationReason?: string; // 推荐理由
-
+  isFromDatabase?: boolean;    // 是否来自本地导师库
+  
   matchReasoning: MatchReasoning;
 }
 
@@ -66,6 +92,7 @@ export interface FacultyRecord extends FacultyMember {
   source: 'search' | 'manual';  // 来源：搜索匹配添加 or 手动录入
   notes?: string;                // 用户备注
   linkedClientIds?: string[];    // 关联的客户ID列表（推荐给了哪些学生）
+  localMatchScore?: number;      // 本地搜索匹配得分
 }
 
 export interface TargetOption {
@@ -142,6 +169,13 @@ export interface ClientEvent {
   completed: boolean;
 }
 
+export interface FacultyMatch {
+  facultyId: string;
+  matchScore: number;
+  matchReasoning: string;
+  reviewedAt?: string;
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -200,5 +234,6 @@ export interface Client {
   selectionDeadline?: string;          // DDL，如 "11.28"
   avoidPreviousMentors?: string;       // 是否避开之前导师及详情
   linkedFacultyIds?: string[];
+  facultyMatches?: FacultyMatch[];
   events?: ClientEvent[];
 }

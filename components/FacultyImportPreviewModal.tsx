@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Check, Trash2, AlertCircle } from 'lucide-react';
-import { FacultyMember } from '../types';
+import { FacultyMember, FacultyRecord } from '../types';
 
 interface ImportItem {
   faculty: FacultyMember;
@@ -13,13 +13,15 @@ interface FacultyImportPreviewModalProps {
   onClose: () => void;
   onConfirm: (data: ImportItem[]) => void;
   data: ImportItem[];
+  facultyDatabase: FacultyRecord[];
 }
 
 const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
   isOpen,
   onClose,
   onConfirm,
-  data: initialData
+  data: initialData,
+  facultyDatabase
 }) => {
   const [items, setItems] = useState<ImportItem[]>(initialData);
 
@@ -135,8 +137,17 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
                       <td className="px-4 py-3">
                         <input 
                           type="text" 
-                          value={item.faculty.deadlineData?.value || ''} 
-                          onChange={(e) => handleUpdate(index, 'deadlineData', { ...item.faculty.deadlineData, value: e.target.value })}
+                          value={Array.isArray(item.faculty.deadlineData) ? (item.faculty.deadlineData[0]?.value || '') : (item.faculty.deadlineData as any)?.value || ''} 
+                          onChange={(e) => {
+                            const newValue = e.target.value;
+                            const currentData = Array.isArray(item.faculty.deadlineData) ? [...item.faculty.deadlineData] : [];
+                            if (currentData.length > 0) {
+                              currentData[0] = { ...currentData[0], value: newValue };
+                            } else {
+                              currentData.push({ value: newValue, sourceUrl: '' });
+                            }
+                            handleUpdate(index, 'deadlineData', currentData);
+                          }}
                           className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm text-gray-600"
                         />
                       </td>
@@ -193,7 +204,7 @@ const FacultyImportPreviewModal: React.FC<FacultyImportPreviewModalProps> = ({
               取消
             </button>
             <button 
-              onClick={() => onConfirm(items)}
+              onClick={() => { onConfirm(items); onClose(); }}
               disabled={items.length === 0}
               className="flex items-center gap-2 px-8 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 disabled:shadow-none active:scale-95"
             >

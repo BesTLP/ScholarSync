@@ -10,7 +10,8 @@ import {
   Moon,
   GraduationCap,
   BookOpen,
-  Loader2
+  Loader2,
+  X
 } from 'lucide-react';
 import { Client } from '../types';
 import EditorWorkspace from './EditorWorkspace';
@@ -281,6 +282,7 @@ const LORWorkbench: React.FC<{
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentDocId, setCurrentDocId] = useState<string | undefined>(initialDocument?.id);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialClientId) {
@@ -297,11 +299,11 @@ const LORWorkbench: React.FC<{
 
   const handleGenerate = async () => {
     if (!selectedClientId) {
-      alert('请先选择或创建一个学生档案');
+      setAlertMessage('请先选择或创建一个学生档案');
       return;
     }
     if (!recommenderInfo) {
-      alert('请填写推荐人信息');
+      setAlertMessage('请填写推荐人信息');
       return;
     }
     setIsGenerating(true);
@@ -408,6 +410,31 @@ const LORWorkbench: React.FC<{
           saveSuccess={saveSuccess}
         />
       </div>
+
+      {/* Alert Modal */}
+      {alertMessage && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h2 className="text-xl font-bold text-gray-900">提示</h2>
+              <button onClick={() => setAlertMessage(null)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                <X size={20} className="text-gray-400" />
+              </button>
+            </div>
+            <div className="p-8">
+              <p className="text-gray-600">{alertMessage}</p>
+            </div>
+            <div className="px-8 py-6 border-t border-gray-100 flex justify-end bg-gray-50/50">
+              <button 
+                onClick={() => setAlertMessage(null)}
+                className="px-8 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all active:scale-95"
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

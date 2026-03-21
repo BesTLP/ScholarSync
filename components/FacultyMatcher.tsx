@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FacultyMember, TargetOption, SourceData, Client, FacultyRecord } from '../types';
-import { generateFacultyMatches, generateFacultyMatchesDecomposed, parseRequirementText, parseClientFile, type DimensionResult, type DecomposedSearchResult } from '../services/geminiService';
+import { generateFacultyMatches, generateFacultyMatchesDecomposed, parseRequirementText, parseClientFile, scoreFacultyFromDatabase, extractKeywords, type DimensionResult, type DecomposedSearchResult } from '../services/geminiService';
 import FacultyCard from './FacultyCard';
 import { 
   Search, 
@@ -317,8 +317,15 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
       let totalCountNeeded = targets.reduce((sum, t) => sum + (t.count || 5), 0) || 10;
 
       if (useDatabase && facultyDatabase && facultyDatabase.length > 0) {
-        const keywords = [...department.split(/[,，、+&\s]+|(?:和|与|AND)/gi), ...studentProfile.split(/\s+/)].map(k => k.toLowerCase()).filter(k => k.length > 2);
-        
+        // Use AI to extract high-quality keywords for better filtering
+        let keywords: string[] = [];
+        try {
+          keywords = await extractKeywords(studentProfile, department);
+        } catch (e) {
+          console.warn("Keyword extraction failed, falling back to simple split", e);
+          keywords = [...department.split(/[,，、+&\s]+|(?:和|与|AND)/gi), ...studentProfile.split(/\s+/).slice(0, 20)].map(k => k.toLowerCase()).filter(k => k.length > 2);
+        }
+
         localResults = facultyDatabase.filter(f => {
            let matchesTarget = targets.length === 0 || targets.some(t => {
              const regionMatch = !t.region || f.country?.toLowerCase().includes(t.region.toLowerCase());
@@ -327,20 +334,35 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
            });
            if (!matchesTarget) return false;
 
-           const textToSearch = `${f.name} ${f.university} ${f.department} ${f.researchAreas.join(' ')} ${f.alignmentDetails}`.toLowerCase();
-           return keywords.some(k => textToSearch.includes(k));
+           const textToSearch = `${f.name} ${f.university} ${f.department} ${f.researchAreas.join(' ')} ${f.alignmentDetails} ${f.fieldCategory} ${f.subFieldCategory || ''}`.toLowerCase();
+           return keywords.some(k => textToSearch.includes(k.toLowerCase()));
         });
 
         // Sort by number of keyword matches (simple relevance)
         localResults.sort((a, b) => {
           const textA = `${a.name} ${a.university} ${a.department} ${a.researchAreas.join(' ')} ${a.alignmentDetails}`.toLowerCase();
           const textB = `${b.name} ${b.university} ${b.department} ${b.researchAreas.join(' ')} ${b.alignmentDetails}`.toLowerCase();
-          const scoreA = keywords.filter(k => textA.includes(k)).length;
-          const scoreB = keywords.filter(k => textB.includes(k)).length;
+          const scoreA = keywords.filter(k => textA.includes(k.toLowerCase())).length;
+          const scoreB = keywords.filter(k => textB.includes(k.toLowerCase())).length;
           return scoreB - scoreA;
         });
 
-        localResults = localResults.slice(0, totalCountNeeded);
+        // Take a larger pool for AI scoring (e.g., top 20 or 2x needed)
+        const poolSize = Math.max(20, totalCountNeeded * 2);
+        let topLocalCandidates = localResults.slice(0, poolSize);
+
+        // If we have local results, use AI to score them properly against the student profile
+        if (topLocalCandidates.length > 0) {
+          try {
+            topLocalCandidates = await scoreFacultyFromDatabase(studentProfile, department, topLocalCandidates);
+            // Re-sort based on AI match score
+            topLocalCandidates.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+            localResults = topLocalCandidates.slice(0, totalCountNeeded).map(f => ({ ...f, isFromDatabase: true }));
+          } catch (e) {
+            console.error("AI scoring for local database failed, falling back to keyword scores", e);
+            localResults = topLocalCandidates.slice(0, totalCountNeeded).map(f => ({ ...f, isFromDatabase: true }));
+          }
+        }
       }
 
       let remainingCount = totalCountNeeded - localResults.length;
@@ -370,12 +392,27 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
       const combinedResults = [...localResults];
       
       // Deduplicate web results against local results based on name and university
-      const uniqueWebResults = webResults.filter(webProf => 
-        !localResults.some(localProf => 
+      // AND mark web results that exist in the database even if not found by local search
+      const uniqueWebResults = webResults.filter(webProf => {
+        const isInLocalResults = localResults.some(localProf => 
           localProf.name.toLowerCase() === webProf.name.toLowerCase() && 
           localProf.university.toLowerCase() === webProf.university.toLowerCase()
-        )
-      );
+        );
+        
+        if (isInLocalResults) return false;
+        
+        // Check if it exists in the full database even if not in localResults (which were filtered by keywords)
+        const isInFullDatabase = useDatabase && facultyDatabase && facultyDatabase.some(dbProf => 
+          dbProf.name.toLowerCase() === webProf.name.toLowerCase() && 
+          dbProf.university.toLowerCase() === webProf.university.toLowerCase()
+        );
+        
+        if (isInFullDatabase) {
+          webProf.isFromDatabase = true;
+        }
+        
+        return true;
+      });
       
       combinedResults.push(...uniqueWebResults);
 
@@ -403,10 +440,15 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
   };
 
   // Helper for Excel Export formatting
-  const formatSourceField = (data?: SourceData) => {
-      if (!data) return "N/A";
-      if (!data.sourceUrl) return data.value;
-      return `${data.value} [Source: ${data.sourceUrl}]`;
+  const formatSourceField = (data?: SourceData | SourceData[]) => {
+    if (!data) return "N/A";
+    if (Array.isArray(data)) {
+      if (data.length === 0) return "N/A";
+      return data.map(d => `${d.value} [Source: ${d.sourceUrl || 'N/A'}]`).join(" | ");
+    }
+    if (typeof data === 'string') return data;
+    if (!data.sourceUrl) return data.value;
+    return `${data.value} [Source: ${data.sourceUrl}]`;
   };
 
   const handleExportCSV = () => {
@@ -494,7 +536,8 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
 
   const handleLinkToClient = (prof: FacultyMember) => {
     if (!activeClientId) {
-      alert("请先在左侧选择要关联的学生");
+      setToast("请先在左侧选择要关联的学生");
+      setTimeout(() => setToast(null), 3000);
       return;
     }
     if (onAddFacultyToDatabase && onLinkFacultyToClient) {
@@ -528,7 +571,8 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
 
   const handleBatchLink = () => {
     if (!activeClientId) {
-       alert("请先在左侧选择要关联的学生");
+       setToast("请先在左侧选择要关联的学生");
+       setTimeout(() => setToast(null), 3000);
        return;
     }
     if (!results) return;

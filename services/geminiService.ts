@@ -3,12 +3,44 @@ import { GoogleGenAI, Type, Schema, Chat } from "@google/genai";
 import { FacultyMember, ImageSize, TargetOption, Client } from "../types";
 
 // Initialize the client
-const getClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getClient = () => {
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Gemini API Key is missing. Please check your .env file and ensure GEMINI_API_KEY is set.");
+  }
+  return new GoogleGenAI({ apiKey });
+};
+
+const withRetry = async <T>(fn: () => Promise<T>, retries = 5, delay = 2000): Promise<T> => {
+  try {
+    return await fn();
+  } catch (error: any) {
+    const isRateLimit = error?.error?.code === 429 || error?.status === 429;
+    if (retries > 0 && isRateLimit) {
+      console.warn(`Rate limit hit, retrying in ${delay}ms... (${retries} retries left)`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return withRetry(fn, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+};
 
 const MODEL_FACULTY_MATCHER = 'gemini-3.1-pro-preview';
 const MODEL_IMAGE_GEN = 'gemini-3.1-flash-image-preview';
 const MODEL_CHAT = 'gemini-3.1-pro-preview';
 const MODEL_FAST = 'gemini-3-flash-preview'; // Use Flash for fast text parsing
+
+// Helper to safely parse JSON, stripping markdown code blocks if present
+const safeParseJSON = (text: string | undefined, fallback: any = {}) => {
+  if (!text) return fallback;
+  try {
+    const jsonStr = text.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    console.error("Failed to parse JSON:", e, text);
+    return fallback;
+  }
+};
 
 interface MatchParams {
   studentProfile: string;
@@ -103,7 +135,7 @@ export const parseRequirementText = async (rawText: string): Promise<ParsedRequi
     });
 
     const jsonText = response.text || "{}";
-    const result = JSON.parse(jsonText) as ParsedRequirements;
+    const result = safeParseJSON(jsonText) as ParsedRequirements;
     
     // Ensure targets is never null/undefined
     if (!result.targets) result.targets = [];
@@ -215,7 +247,7 @@ export const decomposeResearchField = async (
       contents: prompt,
       config: { responseMimeType: "application/json", responseSchema: schema }
     });
-    return JSON.parse(response.text || '{}') as FieldDecomposition;
+    return safeParseJSON(response.text || '{}') as FieldDecomposition;
   } catch {
     return {
       isNiche: false,
@@ -368,6 +400,12 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
   let promptContent = `
     Role: You are a rigorous Academic Admissions Auditor. Your goal is to find high-quality faculty matches with VERIFIED admissions data.
     
+    **CRITICAL INSTRUCTION: DO NOT TRANSLATE CONTENT.**
+    - If the source information is in Chinese, keep it in Chinese.
+    - If the source information is in English, keep it in English.
+    - DO NOT translate program names, research areas, or requirements unless explicitly requested.
+    - FAITHFULLY ADHERE to the original language of the source material.
+
     **CURRENT DATE CONTEXT**: Today is ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}.
     **DEADLINE REQUIREMENT**: You MUST look for future deadlines (Spring ${nextYear} or Fall ${nextYear}). Do NOT return past dates from 2024/2025 unless no other info is available.
 
@@ -435,7 +473,10 @@ ${isInterdisciplinary ? `
     - **QS Ranking**: Include current QS World Ranking (e.g., "QS 2025: #15").
     - **University Names**: Provide both Chinese and English names.
     - **Program Info**: Provide both Chinese and English program names.
-    - **Admission Data**: For deadlines, requirements, RP word count, tuition, and scholarships, you MUST provide the value AND the source URL where you found it.
+    - **Admission Data**: 
+      - **MANDATORY**: For each piece of information (deadline, requirements, tuition, etc.), you MUST provide the specific source URL where you found it.
+      - **MANDATORY**: If you find information from multiple sources, include all of them in the respective array fields (e.g., 'deadlineData': [{value: '...', sourceUrl: '...'}, ...]).
+      - **Detailed Requirements**: Extract specific IELTS/TOEFL scores (total and sub-scores) and degree requirements.
     - **Email**: Must be the official academic email.
     - **Research Areas**: Format as "English Term (中文翻译)".
     - **Match Reasoning**: Chinese, concise, verified.
@@ -496,24 +537,89 @@ ${isInterdisciplinary ? `
           properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
         },
         deadlineData: {
-          type: Type.OBJECT,
-          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+          }
+        },
+        structuredDeadlines: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: { 
+              roundName: { type: Type.STRING, description: "e.g., 'Main Round', 'Round 2', 'Clearing Round'" }, 
+              date: { type: Type.STRING, description: "The deadline date" },
+              sourceUrl: { type: Type.STRING }
+            }
+          }
         },
         applicationReqsData: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+          }
+        },
+        detailedRequirements: {
           type: Type.OBJECT,
-          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+          properties: {
+            ielts: {
+              type: Type.OBJECT,
+              properties: {
+                total: { type: Type.STRING },
+                reading: { type: Type.STRING },
+                listening: { type: Type.STRING },
+                speaking: { type: Type.STRING },
+                writing: { type: Type.STRING },
+                sourceUrl: { type: Type.STRING }
+              }
+            },
+            toefl: {
+              type: Type.OBJECT,
+              properties: {
+                total: { type: Type.STRING },
+                reading: { type: Type.STRING },
+                listening: { type: Type.STRING },
+                speaking: { type: Type.STRING },
+                writing: { type: Type.STRING },
+                sourceUrl: { type: Type.STRING }
+              }
+            },
+            degreeAndGrades: {
+              type: Type.OBJECT,
+              properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+            },
+            greGmat: {
+              type: Type.OBJECT,
+              properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+            },
+            otherMaterials: {
+              type: Type.OBJECT,
+              properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+            }
+          }
         },
         rpReqsData: {
-          type: Type.OBJECT,
-          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+          }
         },
         tuitionData: {
-          type: Type.OBJECT,
-          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+          }
         },
         scholarshipData: {
-          type: Type.OBJECT,
-          properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: { value: { type: Type.STRING }, sourceUrl: { type: Type.STRING } }
+          }
         },
         programUrl: { type: Type.STRING },
         universityUrl: { type: Type.STRING },
@@ -553,7 +659,7 @@ ${isInterdisciplinary ? `
     });
 
     const jsonText = response.text || "[]";
-    const rawResults = JSON.parse(jsonText) as FacultyMember[];
+    const rawResults = safeParseJSON(jsonText) as FacultyMember[];
     // 清洗：过滤明显无效的数据
     return rawResults.map(prof => ({
       ...prof,
@@ -710,7 +816,7 @@ export async function generatePSOutline(params: {
     
     const text = response.text;
     if (!text) return [];
-    return JSON.parse(text);
+    return safeParseJSON(text);
   } catch (error) {
     console.error("Error generating PS outline:", error);
     return Array(outlineCount).fill("Failed to generate outline paragraph.");
@@ -945,7 +1051,7 @@ export async function parseResumeContent(fileContent: string): Promise<Partial<C
     
     const text = response.text;
     if (!text) return {};
-    return JSON.parse(text);
+    return safeParseJSON(text);
   } catch (error) {
     console.error("Error parsing resume:", error);
     return {};
@@ -1131,7 +1237,7 @@ export const parseClientFile = async (fileData: string, mimeType: string = 'text
   });
 
   try {
-    return JSON.parse(response.text || "{}");
+    return safeParseJSON(response.text || "{}");
   } catch (e) {
     console.error("Failed to parse client file:", e);
     return {};
@@ -1169,9 +1275,21 @@ export const searchFacultyByWeb = async (query: string): Promise<FacultyMember[]
       "researchAreas": ["Area 1", "Area 2"],
       "recentActivities": ["Activity 1", "Activity 2"],
       "activitySummary": "Brief summary of recent work",
-      "isActive": true/false (based on recent activity or "Emeritus" status),
-      "matchScore": 0 (default),
+      "isActive": true/false,
+      "matchScore": 0,
       "alignmentDetails": "Brief description of their research focus",
+      "deadlineData": [{"value": "...", "sourceUrl": "..."}],
+      "applicationReqsData": [{"value": "...", "sourceUrl": "..."}],
+      "detailedRequirements": {
+        "ielts": {"total": "...", "reading": "...", "listening": "...", "speaking": "...", "writing": "...", "sourceUrl": "..."},
+        "toefl": {"total": "...", "reading": "...", "listening": "...", "speaking": "...", "writing": "...", "sourceUrl": "..."},
+        "degreeAndGrades": {"value": "...", "sourceUrl": "..."},
+        "greGmat": {"value": "...", "sourceUrl": "..."},
+        "otherMaterials": {"value": "...", "sourceUrl": "..."}
+      },
+      "rpReqsData": [{"value": "...", "sourceUrl": "..."}],
+      "tuitionData": [{"value": "...", "sourceUrl": "..."}],
+      "scholarshipData": [{"value": "...", "sourceUrl": "..."}],
       "matchReasoning": {
          "locationCheck": "Location",
          "universityCheck": "University",
@@ -1188,7 +1306,7 @@ export const searchFacultyByWeb = async (query: string): Promise<FacultyMember[]
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
@@ -1198,9 +1316,92 @@ export const searchFacultyByWeb = async (query: string): Promise<FacultyMember[]
 
     const text = response.text;
     if (!text) return [];
-    return JSON.parse(text) as FacultyMember[];
-  } catch (error) {
+    return safeParseJSON(text) as FacultyMember[];
+  } catch (error: any) {
     console.error("Web search for faculty failed:", error);
+    if (error?.message?.includes("403") || error?.message?.includes("Forbidden")) {
+      console.error("This error often means your API key is on the Free Tier, which does not support Google Search Grounding. Please upgrade to a Paid Plan.");
+    }
+    return [];
+  }
+};
+
+export const searchFacultyByDirectoryUrl = async (url: string): Promise<FacultyMember[]> => {
+  const ai = getClient();
+  
+  const prompt = `
+    Task: Visit the following faculty directory URL and extract all faculty members listed.
+    URL: ${url}
+    
+    Instructions:
+    1. Use the URL Context tool to access the content of the provided page.
+    2. Extract detailed information for each faculty member found on this page.
+    3. **CRITICAL**: You must find the **Official University Profile Page** for each faculty member and use it as the 'profileUrl'.
+    4. **CRITICAL**: You must find the **Official Email** address if available.
+    5. **CRITICAL**: You must find **Recent Academic Activities** (papers, projects) from 2020-2025.
+       - **STRICT FORMAT**: '[Year][Type-Level] Actual Title (Chinese Translation) - Source'
+       - **Type-Level**: '[论文-顶刊]', '[论文-期刊]', '[论文-会议]', '[项目-国家级]', '[项目-省部级]'.
+       - **Source**: The journal name or conference name (e.g., Nature, CVPR).
+       - **MANDATORY**: Every activity MUST have a Year and a Type.
+    
+    Output Format: JSON Array of FacultyMember objects.
+    
+    Schema:
+    {
+      "name": "Name",
+      "title": "Title (e.g., Professor, Associate Professor)",
+      "university": "University Name",
+      "department": "Department Name",
+      "email": "Email Address",
+      "profileUrl": "Official Profile URL",
+      "photoUrl": "Photo URL (optional)",
+      "researchAreas": ["Area 1", "Area 2"],
+      "recentActivities": ["Activity 1", "Activity 2"],
+      "activitySummary": "Brief summary of recent work",
+      "isActive": true/false,
+      "matchScore": 0,
+      "alignmentDetails": "Brief description of their research focus",
+      "deadlineData": [{"value": "...", "sourceUrl": "..."}],
+      "applicationReqsData": [{"value": "...", "sourceUrl": "..."}],
+      "detailedRequirements": {
+        "ielts": {"total": "...", "reading": "...", "listening": "...", "speaking": "...", "writing": "...", "sourceUrl": "..."},
+        "toefl": {"total": "...", "reading": "...", "listening": "...", "speaking": "...", "writing": "...", "sourceUrl": "..."},
+        "degreeAndGrades": {"value": "...", "sourceUrl": "..."},
+        "greGmat": {"value": "...", "sourceUrl": "..."},
+        "otherMaterials": {"value": "...", "sourceUrl": "..."}
+      },
+      "rpReqsData": [{"value": "...", "sourceUrl": "..."}],
+      "tuitionData": [{"value": "...", "sourceUrl": "..."}],
+      "scholarshipData": [{"value": "...", "sourceUrl": "..."}],
+      "matchReasoning": {
+         "locationCheck": "Location",
+         "universityCheck": "University",
+         "departmentCheck": "Department",
+         "positionCheck": "Position",
+         "activityCheck": "Activity Level",
+         "reputationCheck": "Reputation",
+         "researchFit": "Research Focus"
+      }
+    }
+    
+    Return ONLY valid JSON.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        tools: [{ urlContext: {} }]
+      }
+    });
+
+    const text = response.text;
+    if (!text) return [];
+    return safeParseJSON(text) as FacultyMember[];
+  } catch (error) {
+    console.error("Web search for faculty by URL failed:", error);
     return [];
   }
 };
@@ -1216,16 +1417,27 @@ export const searchUniversityInfo = async (university: string, department?: stri
     1. Search for the **Official Graduate Admission Page** for this specific program.
     2. Extract the following data points with their source URLs.
     3. **QS Ranking**: Search specifically for "QS World University Rankings 2025" or "2024" to ensure accuracy. Use the official QS website (topuniversities.com) as the primary source.
+    4. **Detailed Requirements**: Extract specific IELTS/TOEFL scores (Total and sub-scores), Degree/Grade requirements, GRE/GMAT, and other materials.
+    5. **CRITICAL: DO NOT TRANSLATE CONTENT.** Keep the original language of the source material.
     
     Output Schema (JSON):
     {
       "university": "Full Name",
       "qsRanking": "World Ranking",
       "website": "Official URL",
-      "tuition": { "value": "Amount per year", "sourceUrl": "..." },
-      "deadline": { "value": "Next deadline date", "sourceUrl": "..." },
-      "requirements": { "value": "GPA, GRE, English scores", "sourceUrl": "..." },
-      "scholarships": { "value": "Available funding types", "sourceUrl": "..." },
+      "tuitionData": [{ "value": "Amount per year", "sourceUrl": "..." }],
+      "deadlineData": [{ "value": "Next deadline date", "sourceUrl": "..." }],
+      "structuredDeadlines": [{ "roundName": "String", "date": "String", "sourceUrl": "String" }],
+      "applicationReqsData": [{ "value": "GPA, GRE, English scores", "sourceUrl": "..." }],
+      "detailedRequirements": {
+        "ielts": { "total": "String", "reading": "String", "listening": "String", "speaking": "String", "writing": "String", "sourceUrl": "String" },
+        "toefl": { "total": "String", "reading": "String", "listening": "String", "speaking": "String", "writing": "String", "sourceUrl": "String" },
+        "degreeAndGrades": { "value": "String", "sourceUrl": "String" },
+        "greGmat": { "value": "String", "sourceUrl": "String" },
+        "otherMaterials": { "value": "String", "sourceUrl": "String" }
+      },
+      "scholarshipData": [{ "value": "Available funding types", "sourceUrl": "..." }],
+      "rpReqsData": [{ "value": "Word count, topic requirements", "sourceUrl": "..." }],
       "programs": ["Program A", "Program B"]
     }
 
@@ -1234,7 +1446,7 @@ export const searchUniversityInfo = async (university: string, department?: stri
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
@@ -1244,94 +1456,162 @@ export const searchUniversityInfo = async (university: string, department?: stri
 
     const text = response.text;
     if (!text) return null;
-    return JSON.parse(text);
+    return safeParseJSON(text);
   } catch (error) {
     console.error("University search failed:", error);
     return null;
   }
 };
 
-export const processImportedFacultyBatch = async (rows: any[]): Promise<{ faculty: FacultyMember, country: string, fieldCategory: string }[]> => {
+export const parseFacultyInfoFromText = async (rawText: string): Promise<Partial<FacultyMember>> => {
   const ai = getClient();
-  
-  // Clean rows to avoid sending excessively large data
-  const cleanedRows = rows.map(row => {
-    const cleaned: any = {};
-    for (const key in row) {
-      const val = row[key];
-      if (typeof val === 'string') {
-        // Truncate very long strings to keep prompt size reasonable
-        cleaned[key] = val.length > 1000 ? val.substring(0, 1000) + "..." : val;
-      } else {
-        cleaned[key] = val;
-      }
-    }
-    return cleaned;
-  });
-
   const prompt = `
-    Task: You are an expert academic data processor. You have received a batch of raw data rows from an Excel/CSV file representing faculty members.
-    Your job is to extract, clean, and structure this data into a list of valid FacultyMember objects, along with their Country and Field Category.
-    
-    Batch Data (JSON Array):
-    ${JSON.stringify(cleanedRows)}
+    Task: Extract structured faculty and program information from the provided text.
+    Text:
+    """
+    ${rawText}
+    """
     
     Instructions:
-    1. For each row, extract the professor's Name, University (Chinese and English), and Title.
-    2. Extract Program Name (Chinese and English), QS Ranking, Application Deadline, Program URL, University URL, Tuition, and Scholarship Info.
-    3. Extract Application Requirements, RP (Research Proposal) Requirements, Research Areas/Papers, and Recommendation Reason.
-    4. Extract Department, Email, and Profile URL.
-    5. Determine the Country/Region of the University (e.g., "美国", "英国", "中国", "澳洲", "加拿大", "新加坡", etc.).
-    6. Determine the broad Field Category (e.g., "计算机科学", "机械工程", "商科与经济", "生物与医学", etc.) based on their research or department.
-    7. If a row is missing Name or University, try to infer them from context if possible, otherwise skip.
-    8. All missing information can be left as empty strings or nulls; do not hallucinate.
-    9. Return an array of objects matching the schema below.
+    1. Extract all available fields: Name, Title, University, Program, QS Ranking, Deadlines, Requirements, RP Requirements, Tuition, Scholarships.
+    2. **CRITICAL**: For each section, identify the "Source" (来源) if mentioned or implied. If multiple sources are present, list them.
+    3. **Detailed Requirements**: Extract specific IELTS/TOEFL scores (Total, Reading, Listening, Speaking, Writing), Degree/Grade requirements, GRE/GMAT.
+    4. **CRITICAL: DO NOT TRANSLATE CONTENT.** Keep the original language of the source material.
     
-    Output Schema (JSON Array of Objects):
-    [{
-      "faculty": {
-        "name": "String",
-        "title": "String",
-        "university": "String",
-        "universityEn": "String",
-        "department": "String",
-        "programName": "String",
-        "programNameEn": "String",
-        "matchScore": 0,
-        "researchAreas": ["Area 1", "Area 2"],
-        "alignmentDetails": "String",
-        "activitySummary": "",
-        "recentActivities": [],
-        "isActive": true,
-        "profileUrl": "String",
-        "photoUrl": "String",
-        "email": "String",
-        "qsRanking": "String",
-        "qsRankingData": { "value": "String", "sourceUrl": "" },
-        "deadlineData": { "value": "String", "sourceUrl": "" },
-        "applicationReqsData": { "value": "String", "sourceUrl": "" },
-        "rpReqsData": { "value": "String", "sourceUrl": "" },
-        "tuitionData": { "value": "String", "sourceUrl": "" },
-        "scholarshipData": { "value": "String", "sourceUrl": "" },
-        "programUrl": "String",
-        "universityUrl": "String",
-        "recommendationReason": "String",
-        "matchReasoning": {
-          "locationCheck": "",
-          "universityCheck": "",
-          "departmentCheck": "",
-          "researchFit": "",
-          "positionCheck": "",
-          "activityCheck": "",
-          "reputationCheck": ""
-        }
+    Output Schema (JSON):
+    {
+      "name": "String",
+      "title": "String",
+      "university": "String",
+      "universityEn": "String",
+      "programName": "String",
+      "programNameEn": "String",
+      "qsRanking": "String",
+      "deadlineData": [{ "value": "String", "sourceUrl": "String" }],
+      "structuredDeadlines": [{ "roundName": "String", "date": "String", "sourceUrl": "String" }],
+      "applicationReqsData": [{ "value": "String", "sourceUrl": "String" }],
+      "detailedRequirements": {
+        "ielts": { "total": "String", "reading": "String", "listening": "String", "speaking": "String", "writing": "String", "sourceUrl": "String" },
+        "toefl": { "total": "String", "reading": "String", "listening": "String", "speaking": "String", "writing": "String", "sourceUrl": "String" },
+        "degreeAndGrades": { "value": "String", "sourceUrl": "String" },
+        "greGmat": { "value": "String", "sourceUrl": "String" },
+        "otherMaterials": { "value": "String", "sourceUrl": "String" }
       },
-      "country": "String",
-      "fieldCategory": "String"
-    }]
+      "rpReqsData": [{ "value": "String", "sourceUrl": "String" }],
+      "tuitionData": [{ "value": "String", "sourceUrl": "String" }],
+      "scholarshipData": [{ "value": "String", "sourceUrl": "String" }],
+      "email": "String",
+      "profileUrl": "String",
+      "researchAreas": ["String"]
+    }
   `;
 
   try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json'
+      }
+    });
+
+    const text = response.text;
+    if (!text) return {};
+    return safeParseJSON(text);
+  } catch (error) {
+    console.error("Text parsing failed:", error);
+    return {};
+  }
+};
+
+export const processImportedFacultyBatch = async (rows: any[]): Promise<{ faculty: FacultyMember, country: string, fieldCategory: string }[]> => {
+  return withRetry(async () => {
+    const ai = getClient();
+    
+    // Clean rows to avoid sending excessively large data
+    const cleanedRows = rows.map(row => {
+      const cleaned: any = {};
+      for (const key in row) {
+        const val = row[key];
+        if (typeof val === 'string') {
+          // Truncate very long strings to keep prompt size reasonable
+          cleaned[key] = val.length > 1000 ? val.substring(0, 1000) + "..." : val;
+        } else {
+          cleaned[key] = val;
+        }
+      }
+      return cleaned;
+    });
+
+    const prompt = `
+      Task: You are an expert academic data processor. You have received a batch of raw data rows from an Excel/CSV file representing faculty members.
+      Your job is to extract, clean, and structure this data into a list of valid FacultyMember objects, along with their Country and Field Category.
+      
+      Batch Data (JSON Array):
+      ${JSON.stringify(cleanedRows)}
+      
+      Instructions:
+      1. For each row, extract the professor's Name, University (Chinese and English), and Title.
+      2. Extract Program Name (Chinese and English), QS Ranking, Application Deadline, Program URL, University URL, Tuition, and Scholarship Info.
+      3. Extract Application Requirements, RP (Research Proposal) Requirements, Research Areas/Papers, and Recommendation Reason.
+      4. Extract Department, Email, and Profile URL.
+      5. Determine the Country/Region of the University (e.g., "美国", "英国", "中国", "澳洲", "加拿大", "新加坡", etc.).
+      6. Determine the broad Field Category (e.g., "计算机科学", "机械工程", "商科与经济", "生物与医学", etc.) based on their research or department.
+      7. If a row is missing Name or University, try to infer them from context if possible, otherwise skip.
+      8. All missing information can be left as empty strings or nulls; do not hallucinate.
+      9. Return an array of objects matching the schema below.
+      
+      Output Schema (JSON Array of Objects):
+      [{
+        "faculty": {
+          "name": "String",
+          "title": "String",
+          "university": "String",
+          "universityEn": "String",
+          "department": "String",
+          "programName": "String",
+          "programNameEn": "String",
+          "matchScore": 0,
+          "researchAreas": ["Area 1", "Area 2"],
+          "alignmentDetails": "String",
+          "activitySummary": "",
+          "recentActivities": [],
+          "isActive": true,
+          "profileUrl": "String",
+          "photoUrl": "String",
+          "email": "String",
+          "qsRanking": "String",
+          "qsRankingData": { "value": "String", "sourceUrl": "" },
+          "deadlineData": [{ "value": "String", "sourceUrl": "" }],
+          "applicationReqsData": [{ "value": "String", "sourceUrl": "" }],
+          "detailedRequirements": {
+            "ielts": { "total": "String", "reading": "String", "listening": "String", "speaking": "String", "writing": "String", "sourceUrl": "String" },
+            "toefl": { "total": "String", "reading": "String", "listening": "String", "speaking": "String", "writing": "String", "sourceUrl": "String" },
+            "degreeAndGrades": { "value": "String", "sourceUrl": "String" },
+            "greGmat": { "value": "String", "sourceUrl": "String" },
+            "otherMaterials": { "value": "String", "sourceUrl": "String" }
+          },
+          "rpReqsData": [{ "value": "String", "sourceUrl": "" }],
+          "tuitionData": [{ "value": "String", "sourceUrl": "" }],
+          "scholarshipData": [{ "value": "String", "sourceUrl": "" }],
+          "programUrl": "String",
+          "universityUrl": "String",
+          "recommendationReason": "String",
+          "matchReasoning": {
+            "locationCheck": "",
+            "universityCheck": "",
+            "departmentCheck": "",
+            "researchFit": "",
+            "positionCheck": "",
+            "activityCheck": "",
+            "reputationCheck": ""
+          }
+        },
+        "country": "String",
+        "fieldCategory": "String"
+      }]
+    `;
+
     const response = await ai.models.generateContent({
       model: MODEL_FAST,
       contents: prompt,
@@ -1341,77 +1621,84 @@ export const processImportedFacultyBatch = async (rows: any[]): Promise<{ facult
     const text = response.text;
     if (!text) return [];
     
-    const result = JSON.parse(text);
+    // Strip markdown code blocks if present
+    const jsonStr = text.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
+    
+    const result = safeParseJSON(jsonStr);
     if (!Array.isArray(result)) return [];
     
     return result.filter(item => item.faculty && item.faculty.name && item.faculty.university);
-  } catch (error) {
-    console.error("Failed to process imported batch:", error);
-    throw error; // Rethrow to trigger fallback in UI
-  }
+  });
 };
 
 export const processImportedFacultyRow = async (rawRow: any): Promise<{ faculty: FacultyMember, country: string, fieldCategory: string } | null> => {
-  const ai = getClient();
-  const prompt = `
-    Task: You are an expert academic data processor. You have received a raw row of data from an Excel/CSV file representing a faculty member.
-    Your job is to extract, clean, and structure this data into a valid FacultyMember object, along with their Country and Field Category.
-    
-    Raw Row Data (JSON):
-    ${JSON.stringify(rawRow)}
-    
-    Instructions:
-    1. Extract the professor's Name, University, and Title. These are REQUIRED. If Name or University is completely missing and cannot be inferred, return null (by returning an empty object or throwing, but preferably just do your best to extract).
-    2. Extract Department, Research Areas (as an array of strings), Email, Profile URL.
-    3. Determine the Country/Region of the University (e.g., "美国", "英国", "中国", "澳洲", "加拿大", "新加坡", etc.).
-    4. Determine the broad Field Category (e.g., "计算机科学", "机械工程", "商科与经济", "生物与医学", etc.) based on their research or department.
-    5. Ensure all fields match the required schema.
-    
-    Output Schema (JSON):
-    {
-      "faculty": {
-        "name": "String",
-        "title": "String",
-        "university": "String",
-        "universityEn": "String",
-        "department": "String",
-        "programName": "String",
-        "programNameEn": "String",
-        "matchScore": 0,
-        "researchAreas": ["Area 1", "Area 2"],
-        "alignmentDetails": "String (Summary of their work)",
-        "activitySummary": "String",
-        "recentActivities": ["Activity 1", "Activity 2"],
-        "isActive": true,
-        "profileUrl": "String",
-        "photoUrl": "String",
-        "email": "String",
-        "qsRanking": "String",
-        "qsRankingData": { "value": "String", "sourceUrl": "String" },
-        "deadlineData": { "value": "String", "sourceUrl": "String" },
-        "applicationReqsData": { "value": "String", "sourceUrl": "String" },
-        "rpReqsData": { "value": "String", "sourceUrl": "String" },
-        "tuitionData": { "value": "String", "sourceUrl": "String" },
-        "scholarshipData": { "value": "String", "sourceUrl": "String" },
-        "programUrl": "String",
-        "universityUrl": "String",
-        "recommendationReason": "String",
-        "matchReasoning": {
-          "locationCheck": "",
-          "universityCheck": "",
-          "departmentCheck": "",
-          "researchFit": "",
-          "positionCheck": "",
-          "activityCheck": "",
-          "reputationCheck": ""
-        }
-      },
-      "country": "String (e.g., 美国)",
-      "fieldCategory": "String (e.g., 计算机科学)"
-    }
-  `;
+  return withRetry(async () => {
+    const ai = getClient();
+    const prompt = `
+      Task: You are an expert academic data processor. You have received a raw row of data from an Excel/CSV file representing a faculty member.
+      Your job is to extract, clean, and structure this data into a valid FacultyMember object, along with their Country and Field Category.
+      
+      Raw Row Data (JSON):
+      ${JSON.stringify(rawRow)}
+      
+      Instructions:
+      1. Extract the professor's Name, University, and Title. These are REQUIRED. If Name or University is completely missing and cannot be inferred, return null (by returning an empty object or throwing, but preferably just do your best to extract).
+      2. Extract Department, Research Areas (as an array of strings), Email, Profile URL.
+      3. Determine the Country/Region of the University (e.g., "美国", "英国", "中国", "澳洲", "加拿大", "新加坡", etc.).
+      4. Determine the broad Field Category (e.g., "计算机科学", "机械工程", "商科与经济", "生物与医学", etc.) based on their research or department.
+      5. Ensure all fields match the required schema.
+      
+      Output Schema (JSON):
+      {
+        "faculty": {
+          "name": "String",
+          "title": "String",
+          "university": "String",
+          "universityEn": "String",
+          "department": "String",
+          "programName": "String",
+          "programNameEn": "String",
+          "matchScore": 0,
+          "researchAreas": ["Area 1", "Area 2"],
+          "alignmentDetails": "String (Summary of their work)",
+          "activitySummary": "String",
+          "recentActivities": ["Activity 1", "Activity 2"],
+          "isActive": true,
+          "profileUrl": "String",
+          "photoUrl": "String",
+          "email": "String",
+          "qsRanking": "String",
+          "qsRankingData": { "value": "String", "sourceUrl": "String" },
+          "deadlineData": [{ "value": "String", "sourceUrl": "String" }],
+          "applicationReqsData": [{ "value": "String", "sourceUrl": "String" }],
+          "detailedRequirements": {
+            "ielts": { "total": "String", "reading": "String", "listening": "String", "speaking": "String", "writing": "String", "sourceUrl": "String" },
+            "toefl": { "total": "String", "reading": "String", "listening": "String", "speaking": "String", "writing": "String", "sourceUrl": "String" },
+            "degreeAndGrades": { "value": "String", "sourceUrl": "String" },
+            "greGmat": { "value": "String", "sourceUrl": "String" },
+            "otherMaterials": { "value": "String", "sourceUrl": "String" }
+          },
+          "rpReqsData": [{ "value": "String", "sourceUrl": "String" }],
+          "tuitionData": [{ "value": "String", "sourceUrl": "String" }],
+          "scholarshipData": [{ "value": "String", "sourceUrl": "String" }],
+          "programUrl": "String",
+          "universityUrl": "String",
+          "recommendationReason": "String",
+          "matchReasoning": {
+             "locationCheck": "",
+             "universityCheck": "",
+             "departmentCheck": "",
+             "researchFit": "",
+             "positionCheck": "",
+             "activityCheck": "",
+             "reputationCheck": ""
+          }
+        },
+        "country": "String (e.g., 美国)",
+        "fieldCategory": "String (e.g., 计算机科学)"
+      }
+    `;
 
-  try {
     const response = await ai.models.generateContent({
       model: MODEL_FAST,
       contents: prompt,
@@ -1421,14 +1708,14 @@ export const processImportedFacultyRow = async (rawRow: any): Promise<{ faculty:
     const text = response.text;
     if (!text) return null;
     
-    const result = JSON.parse(text);
+    // Strip markdown code blocks if present
+    const jsonStr = text.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
+    
+    const result = safeParseJSON(jsonStr);
     if (!result.faculty || !result.faculty.name || !result.faculty.university) return null;
     
     return result;
-  } catch (error) {
-    console.error("Failed to process imported row:", error);
-    return null;
-  }
+  });
 };
 
 export const refreshFacultyData = async (existing: FacultyMember): Promise<FacultyMember> => {
@@ -1448,7 +1735,36 @@ export const refreshFacultyData = async (existing: FacultyMember): Promise<Facul
     3. Verify **Email** and **Title**.
     4. Check if they are still active at this university.
     
-    Output: Return the updated FacultyMember JSON object. Keep existing data if no new info found, but update 'updatedAt' implicitly by returning fresh data.
+    Output: Return the updated FacultyMember JSON object. 
+    
+    FacultyMember Schema:
+    {
+      "name": "...",
+      "title": "...",
+      "university": "...",
+      "universityEn": "...",
+      "department": "...",
+      "researchAreas": ["..."],
+      "activitySummary": "...",
+      "recentActivities": ["[Year][Type] Title - Source", ...],
+      "isActive": true,
+      "profileUrl": "...",
+      "email": "...",
+      "deadlineData": [{"value": "...", "sourceUrl": "..."}],
+      "applicationReqsData": [{"value": "...", "sourceUrl": "..."}],
+      "detailedRequirements": {
+        "ielts": {"total": "...", "reading": "...", "listening": "...", "speaking": "...", "writing": "...", "sourceUrl": "..."},
+        "toefl": {"total": "...", "reading": "...", "listening": "...", "speaking": "...", "writing": "...", "sourceUrl": "..."},
+        "degreeAndGrades": {"value": "...", "sourceUrl": "..."},
+        "greGmat": {"value": "...", "sourceUrl": "..."},
+        "otherMaterials": {"value": "...", "sourceUrl": "..."}
+      },
+      "rpReqsData": [{"value": "...", "sourceUrl": "..."}],
+      "tuitionData": [{"value": "...", "sourceUrl": "..."}],
+      "scholarshipData": [{"value": "...", "sourceUrl": "..."}]
+    }
+    
+    Keep existing data if no new info found, but update 'updatedAt' implicitly by returning fresh data.
   `;
 
   try {
@@ -1463,10 +1779,140 @@ export const refreshFacultyData = async (existing: FacultyMember): Promise<Facul
 
     const text = response.text;
     if (!text) return existing;
-    return JSON.parse(text) as FacultyMember;
+    return safeParseJSON(text) as FacultyMember;
   } catch (error) {
     console.error("Faculty refresh failed:", error);
     return existing;
+  }
+};
+
+/**
+ * Extracts key research and academic keywords from a student profile.
+ */
+export const extractKeywords = async (profile: string, department: string): Promise<string[]> => {
+  const ai = getClient();
+  const prompt = `
+    Task: Extract 10-15 essential academic and research keywords from the following student profile and target department.
+    Focus on specific research topics, methodologies, and technical terms.
+    
+    Department: ${department}
+    Profile:
+    """
+    ${profile}
+    """
+    
+    Output Format: JSON array of strings.
+    Example: ["Machine Learning", "Computer Vision", "Deep Learning", "Medical Imaging"]
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL_FAST,
+      contents: prompt,
+      config: { responseMimeType: "application/json" }
+    });
+    const text = response.text;
+    if (!text) return [];
+    return safeParseJSON(text);
+  } catch (error) {
+    console.error("Failed to extract keywords:", error);
+    return [];
+  }
+};
+
+/**
+ * Scores and ranks a list of faculty members from the local database against a student profile.
+ */
+export const scoreFacultyFromDatabase = async (
+  studentProfile: string,
+  department: string,
+  facultyList: FacultyMember[]
+): Promise<FacultyMember[]> => {
+  if (facultyList.length === 0) return [];
+  
+  const ai = getClient();
+  
+  // Prepare a condensed version of faculty data to save tokens
+  const condensedFaculty = facultyList.map((f, index) => ({
+    id: index,
+    name: f.name,
+    university: f.university,
+    department: f.department,
+    title: f.title,
+    researchAreas: f.researchAreas,
+    activitySummary: f.activitySummary,
+    alignmentDetails: f.alignmentDetails // Include existing alignment if any
+  }));
+
+  const prompt = `
+    Task: You are an expert Academic Admissions Matcher. Your goal is to evaluate how well each of the following faculty members matches a student's research profile.
+    
+    Student Profile:
+    """
+    ${studentProfile}
+    """
+    
+    Target Department/Field: "${department || "General"}"
+    
+    Faculty List to Evaluate:
+    ${JSON.stringify(condensedFaculty)}
+    
+    Instructions:
+    1. For each faculty member, calculate a 'matchScore' (0-100) based on their research fit with the student's profile.
+    2. Provide a detailed 'alignmentDetails' (in Chinese) explaining WHY they are a good match.
+    3. Provide a 'matchReasoning' object with specific checks.
+    4. Return the results as a JSON array of objects, where each object contains the 'id' from the input list and the updated matching fields.
+    
+    Output Format (JSON Array):
+    [
+      {
+        "id": 0,
+        "matchScore": 95,
+        "alignmentDetails": "该导师的研究方向与学生在...方面的背景高度契合...",
+        "matchReasoning": {
+          "locationCheck": "符合",
+          "universityCheck": "符合",
+          "departmentCheck": "高度匹配",
+          "researchFit": "研究兴趣完全一致",
+          "positionCheck": "符合要求",
+          "activityCheck": "活跃",
+          "reputationCheck": "优秀"
+        }
+      }
+    ]
+    
+    Return ONLY the JSON array.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL_FAST,
+      contents: prompt,
+      config: { responseMimeType: "application/json" }
+    });
+
+    const text = response.text;
+    if (!text) return facultyList;
+    
+    const scores = safeParseJSON(text);
+    if (!Array.isArray(scores)) return facultyList;
+
+    // Map scores back to original list
+    return facultyList.map((f, index) => {
+      const scoreData = scores.find((s: any) => s.id === index);
+      if (scoreData) {
+        return {
+          ...f,
+          matchScore: scoreData.matchScore || 0,
+          alignmentDetails: scoreData.alignmentDetails || f.alignmentDetails,
+          matchReasoning: scoreData.matchReasoning || f.matchReasoning
+        };
+      }
+      return f;
+    });
+  } catch (error) {
+    console.error("Failed to score faculty from database:", error);
+    return facultyList;
   }
 };
 

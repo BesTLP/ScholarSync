@@ -351,6 +351,7 @@ const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, on
   
   // Save Modal State
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false);
   const [documentTitle, setDocumentTitle] = useState('');
 
   useEffect(() => {
@@ -438,9 +439,12 @@ const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, on
   };
 
   const handleRegenerate = () => {
-    if (confirm('重新生成将覆盖当前内容，确定要继续吗？')) {
-      handleGenerateContent();
-    }
+    setShowRegenerateConfirm(true);
+  };
+
+  const confirmRegenerate = () => {
+    setShowRegenerateConfirm(false);
+    handleGenerateContent();
   };
 
   if (generatedContent) {
@@ -536,6 +540,37 @@ const PSWorkbench: React.FC<PSWorkbenchProps> = ({ clients, onAddClientClick, on
             重新生成
           </button>
         </div>
+
+        {/* Regenerate Confirm Modal */}
+        {showRegenerateConfirm && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                <h2 className="text-xl font-bold text-gray-900">提示</h2>
+                <button onClick={() => setShowRegenerateConfirm(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                  <X size={20} className="text-gray-400" />
+                </button>
+              </div>
+              <div className="p-8">
+                <p className="text-gray-600">重新生成将覆盖当前内容，确定要继续吗？</p>
+              </div>
+              <div className="px-8 py-6 border-t border-gray-100 flex justify-end bg-gray-50/50 space-x-3">
+                <button 
+                  onClick={() => setShowRegenerateConfirm(false)}
+                  className="px-6 py-2.5 rounded-xl text-sm font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={confirmRegenerate}
+                  className="px-8 py-2.5 bg-cyan-500 text-white rounded-xl text-sm font-bold hover:bg-cyan-600 shadow-md shadow-cyan-500/20 transition-all active:scale-95"
+                >
+                  确定
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

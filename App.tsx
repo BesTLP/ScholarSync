@@ -17,7 +17,8 @@ import CreateClientModal from './components/CreateClientModal';
 import FacultyDatabase from './components/FacultyDatabase';
 import ChatBot from './components/ChatBot';
 import { TabId } from './components/Sidebar';
-import { Client, FacultyRecord, FacultyMember } from './types';
+import { Client, FacultyRecord, FacultyMember, FacultyMatch } from './types';
+import { scoreFacultyFromDatabase } from './services/geminiService';
 import { Construction, MessageCircle, GripHorizontal, Minimize2, Maximize2, X } from 'lucide-react';
 
 const ComingSoon = ({ title }: { title: string }) => (
@@ -176,7 +177,6 @@ function App() {
 
   const deleteClient = (clientId: string) => {
     console.log('App: Deleting client', clientId);
-    window.alert('正在删除客户: ' + clientId);
     setClients(prev => {
       const filtered = prev.filter(c => c.id !== clientId);
       console.log('App: Clients after deletion', filtered.length);
@@ -284,12 +284,15 @@ function App() {
         const classification = classify(faculty, manualCountry, manualField);
         const finalClassification = { ...classification, ...extra };
 
+        // Clear matchScore when adding to database as it's student-specific
+        const facultyToSave = { ...faculty, matchScore: 0 };
+
         if (existing) {
           const isManual = existing.classificationSource === 'manual' || existing.classificationSource === 'hybrid' || extra?.classificationSource === 'manual';
           const updatedIdx = newDatabase.findIndex(f => f.id === existing.id);
           newDatabase[updatedIdx] = {
             ...existing,
-            ...faculty,
+            ...facultyToSave,
             country: isManual ? (extra?.country || existing.country) : classification.country,
             fieldCategory: isManual ? (extra?.fieldCategory || existing.fieldCategory) : classification.fieldCategory,
             subFieldCategory: isManual ? (extra?.subFieldCategory || existing.subFieldCategory) : classification.subFieldCategory,
@@ -303,7 +306,7 @@ function App() {
         } else {
           const newId = crypto.randomUUID();
           const newRecord: FacultyRecord = {
-            ...faculty,
+            ...facultyToSave,
             id: newId,
             ...finalClassification,
             classificationSource: extra?.classificationSource || 'auto',
@@ -473,6 +476,9 @@ function App() {
       ...extra
     };
 
+    // Clear matchScore when adding to database as it's student-specific
+    const facultyToSave = { ...faculty, matchScore: 0 };
+
     if (existing) {
       // Update existing
       setFacultyDatabase(prev => prev.map(f => {
@@ -482,7 +488,7 @@ function App() {
           
           return {
             ...f,
-            ...faculty,
+            ...facultyToSave,
             country: isManual ? (extra?.country || f.country) : classification.country,
             fieldCategory: isManual ? (extra?.fieldCategory || f.fieldCategory) : classification.fieldCategory,
             subFieldCategory: isManual ? (extra?.subFieldCategory || f.subFieldCategory) : classification.subFieldCategory,
@@ -500,7 +506,7 @@ function App() {
 
     const newId = crypto.randomUUID();
     const newRecord: FacultyRecord = {
-      ...faculty,
+      ...facultyToSave,
       id: newId,
       ...finalClassification,
       classificationSource: extra?.classificationSource || 'auto',
@@ -585,6 +591,89 @@ function App() {
       }
       return prev;
     });
+  };
+
+  const reviewFacultyMatch = async (clientId: string, facultyId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    const faculty = facultyDatabase.find(f => f.id === facultyId);
+    
+    if (!client || !faculty) return;
+    
+    // Construct student profile from client data
+    const studentProfile = `
+      姓名: ${client.name}
+      背景: ${client.academicAchievements || ''}
+      兴趣: ${client.interests || ''}
+      目标专业: ${client.targetDepartment || ''}
+      意向国家: ${client.targetCountries || ''}
+      特殊要求: ${client.specialRequirements || ''}
+    `;
+    
+    try {
+      const results = await scoreFacultyFromDatabase(studentProfile, client.targetDepartment || '', [faculty]);
+      const scoredFaculty = results[0];
+      
+      if (scoredFaculty) {
+        const match: FacultyMatch = {
+          facultyId: facultyId,
+          matchScore: scoredFaculty.matchScore,
+          matchReasoning: scoredFaculty.alignmentDetails,
+          reviewedAt: new Date().toISOString()
+        };
+        
+        const updateClient = (c: Client) => {
+          const existingMatches = c.facultyMatches || [];
+          const filteredMatches = existingMatches.filter(m => m.facultyId !== facultyId);
+          return { ...c, facultyMatches: [...filteredMatches, match] };
+        };
+
+        setClients(prev => prev.map(c => c.id === clientId ? updateClient(c) : c));
+        setSelectedClient(prev => prev?.id === clientId ? updateClient(prev) : prev);
+      }
+    } catch (error) {
+      console.error("Failed to review faculty match:", error);
+    }
+  };
+
+  const batchReviewFacultyMatches = async (clientId: string, facultyIds: string[]) => {
+    const client = clients.find(c => c.id === clientId);
+    const faculties = facultyDatabase.filter(f => facultyIds.includes(f.id));
+    
+    if (!client || faculties.length === 0) return;
+    
+    const studentProfile = `
+      姓名: ${client.name}
+      背景: ${client.academicAchievements || ''}
+      兴趣: ${client.interests || ''}
+      目标专业: ${client.targetDepartment || ''}
+      意向国家: ${client.targetCountries || ''}
+      特殊要求: ${client.specialRequirements || ''}
+    `;
+    
+    try {
+      const results = await scoreFacultyFromDatabase(studentProfile, client.targetDepartment || '', faculties);
+      
+      const newMatches: FacultyMatch[] = results.map((scored, index) => {
+        const originalFaculty = faculties[index];
+        return {
+          facultyId: originalFaculty.id,
+          matchScore: scored.matchScore || 0,
+          matchReasoning: scored.alignmentDetails,
+          reviewedAt: new Date().toISOString()
+        };
+      });
+      
+      const updateClient = (c: Client) => {
+        const existingMatches = c.facultyMatches || [];
+        const filteredMatches = existingMatches.filter(m => !facultyIds.includes(m.facultyId));
+        return { ...c, facultyMatches: [...filteredMatches, ...newMatches] };
+      };
+
+      setClients(prev => prev.map(c => c.id === clientId ? updateClient(c) : c));
+      setSelectedClient(prev => prev?.id === clientId ? updateClient(prev) : prev);
+    } catch (error) {
+      console.error("Failed to batch review faculty matches:", error);
+    }
   };
 
   const unlinkFacultyFromClient = (facultyId: string, clientId: string) => {
@@ -746,6 +835,8 @@ function App() {
               facultyDatabase={facultyDatabase}
               onLinkFacultyToClient={linkFacultyToClient}
               onUnlinkFacultyFromClient={unlinkFacultyFromClient}
+              onReviewMatch={reviewFacultyMatch}
+              onBatchReviewMatch={batchReviewFacultyMatches}
             />
           </div>
         )}

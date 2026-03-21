@@ -45,6 +45,21 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
     profileUrl: '',
     tuition: '',
     scholarship: '',
+    // Detailed Requirements
+    ieltsTotal: '',
+    ieltsReading: '',
+    ieltsListening: '',
+    ieltsSpeaking: '',
+    ieltsWriting: '',
+    toeflTotal: '',
+    toeflReading: '',
+    toeflListening: '',
+    toeflSpeaking: '',
+    toeflWriting: '',
+    degreeAndGrades: '',
+    greGmat: '',
+    otherMaterials: '',
+    // System info
     country: '',
     fieldCategory: '',
     subFieldCategory: '',
@@ -55,13 +70,16 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
     photoUrl: ''
   });
 
+  const [error, setError] = useState<string | null>(null);
+
   if (!isOpen) return null;
 
   const handleSave = () => {
     if (!form.name || !form.university) {
-      alert('请填写姓名和学校');
+      setError('请填写姓名和学校');
       return;
     }
+    setError(null);
 
     const newFaculty: FacultyMember = {
       name: form.name,
@@ -76,11 +94,32 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
       photoUrl: form.photoUrl,
       programUrl: form.programUrl,
       qsRanking: form.qsRanking,
-      deadlineData: { value: form.deadline, sourceUrl: '' },
-      applicationReqsData: { value: form.applicationReqs, sourceUrl: '' },
-      rpReqsData: { value: form.rpReqs, sourceUrl: '' },
-      tuitionData: { value: form.tuition, sourceUrl: '' },
-      scholarshipData: { value: form.scholarship, sourceUrl: '' },
+      deadlineData: [{ value: form.deadline, sourceUrl: '' }],
+      applicationReqsData: [{ value: form.applicationReqs, sourceUrl: '' }],
+      rpReqsData: [{ value: form.rpReqs, sourceUrl: '' }],
+      tuitionData: [{ value: form.tuition, sourceUrl: '' }],
+      scholarshipData: [{ value: form.scholarship, sourceUrl: '' }],
+      detailedRequirements: {
+        ielts: {
+          total: form.ieltsTotal,
+          reading: form.ieltsReading,
+          listening: form.ieltsListening,
+          speaking: form.ieltsSpeaking,
+          writing: form.ieltsWriting,
+          sourceUrl: ''
+        },
+        toefl: {
+          total: form.toeflTotal,
+          reading: form.toeflReading,
+          listening: form.toeflListening,
+          speaking: form.toeflSpeaking,
+          writing: form.toeflWriting,
+          sourceUrl: ''
+        },
+        degreeAndGrades: { value: form.degreeAndGrades, sourceUrl: '' },
+        greGmat: { value: form.greGmat, sourceUrl: '' },
+        otherMaterials: { value: form.otherMaterials, sourceUrl: '' }
+      },
       researchAreas: form.researchAreas.split(/[,，]/).map(s => s.trim()).filter(Boolean),
       recentActivities: [],
       activitySummary: '',
@@ -136,7 +175,20 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
       regionPath: '',
       classificationPath: '',
       classificationNote: '',
-      photoUrl: ''
+      photoUrl: '',
+      ieltsTotal: '',
+      ieltsReading: '',
+      ieltsListening: '',
+      ieltsSpeaking: '',
+      ieltsWriting: '',
+      toeflTotal: '',
+      toeflReading: '',
+      toeflListening: '',
+      toeflSpeaking: '',
+      toeflWriting: '',
+      degreeAndGrades: '',
+      greGmat: '',
+      otherMaterials: ''
     });
   };
 
@@ -155,6 +207,12 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
 
         {/* Form Content */}
         <div className="p-8 max-h-[70vh] overflow-y-auto custom-scrollbar bg-white/20 backdrop-blur-sm">
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm font-medium flex items-center">
+              <span className="mr-2">⚠️</span>
+              {error}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-6">
             <InputField 
               label="导师姓名" 
@@ -284,6 +342,57 @@ const FacultyManualEntryModal: React.FC<FacultyManualEntryModalProps> = ({ isOpe
               onChange={v => setForm({...form, scholarship: v})} 
               placeholder="例如: Full funding available" 
             />
+            <div className="col-span-2 border-t border-gray-200 pt-6 mt-2">
+              <h4 className="text-sm font-bold text-indigo-600 mb-4 flex items-center gap-2">
+                <GraduationCap size={18} />
+                详细招生要求 (语言/成绩)
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4 p-4 bg-indigo-50/30 rounded-2xl border border-indigo-100">
+                  <h5 className="text-xs font-black text-indigo-500 uppercase tracking-widest">IELTS 雅思要求</h5>
+                  <div className="grid grid-cols-5 gap-2">
+                    <InputField label="总分" value={form.ieltsTotal} onChange={v => setForm({...form, ieltsTotal: v})} />
+                    <InputField label="阅读" value={form.ieltsReading} onChange={v => setForm({...form, ieltsReading: v})} />
+                    <InputField label="听力" value={form.ieltsListening} onChange={v => setForm({...form, ieltsListening: v})} />
+                    <InputField label="口语" value={form.ieltsSpeaking} onChange={v => setForm({...form, ieltsSpeaking: v})} />
+                    <InputField label="写作" value={form.ieltsWriting} onChange={v => setForm({...form, ieltsWriting: v})} />
+                  </div>
+                </div>
+                <div className="space-y-4 p-4 bg-blue-50/30 rounded-2xl border border-blue-100">
+                  <h5 className="text-xs font-black text-blue-500 uppercase tracking-widest">TOEFL 托福要求</h5>
+                  <div className="grid grid-cols-5 gap-2">
+                    <InputField label="总分" value={form.toeflTotal} onChange={v => setForm({...form, toeflTotal: v})} />
+                    <InputField label="阅读" value={form.toeflReading} onChange={v => setForm({...form, toeflReading: v})} />
+                    <InputField label="听力" value={form.toeflListening} onChange={v => setForm({...form, toeflListening: v})} />
+                    <InputField label="口语" value={form.toeflSpeaking} onChange={v => setForm({...form, toeflSpeaking: v})} />
+                    <InputField label="写作" value={form.toeflWriting} onChange={v => setForm({...form, toeflWriting: v})} />
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <InputField 
+                    label="学位与成绩要求" 
+                    icon={BookOpen} 
+                    value={form.degreeAndGrades} 
+                    onChange={v => setForm({...form, degreeAndGrades: v})} 
+                    placeholder="例如: 2:1 honours degree or equivalent (75%+)" 
+                  />
+                </div>
+                <InputField 
+                  label="GRE / GMAT" 
+                  icon={BookOpen} 
+                  value={form.greGmat} 
+                  onChange={v => setForm({...form, greGmat: v})} 
+                  placeholder="例如: GRE required (320+)" 
+                />
+                <InputField 
+                  label="其他申请材料" 
+                  icon={BookOpen} 
+                  value={form.otherMaterials} 
+                  onChange={v => setForm({...form, otherMaterials: v})} 
+                  placeholder="例如: Portfolio, Writing Sample" 
+                />
+              </div>
+            </div>
             <div className="col-span-2 border-t border-gray-200 pt-4 mt-2">
               <h4 className="text-sm font-bold text-gray-700 mb-4">分类与系统信息 (可选)</h4>
               <div className="grid grid-cols-2 gap-6">

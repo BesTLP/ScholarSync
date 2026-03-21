@@ -209,6 +209,7 @@ const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({ value, onChange, onSa
   const [historyIndex, setHistoryIndex] = useState(0);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [isPreview, setIsPreview] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Sync history when value changes externally (e.g. initial load)
@@ -266,14 +267,8 @@ const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({ value, onChange, onSa
 
   const handleCopy = () => {
     navigator.clipboard.writeText(value || '');
-    // Simple alert for now, ideally a toast
-    const btn = document.activeElement as HTMLElement;
-    if (btn) {
-      const originalText = btn.title;
-      btn.title = "已复制!";
-      setTimeout(() => btn.title = originalText, 2000);
-    }
-    alert('内容已复制到剪贴板');
+    setToast('内容已复制到剪贴板');
+    setTimeout(() => setToast(null), 3000);
   };
 
   const charCount = (value || '').replace(/\s/g, '').length;
@@ -333,6 +328,16 @@ const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({ value, onChange, onSa
 
       <EditorFooter charCount={charCount} wordCount={wordCount} />
       <FloatingAIButtons />
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center space-x-3">
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+            <span className="text-sm font-medium">{toast}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
