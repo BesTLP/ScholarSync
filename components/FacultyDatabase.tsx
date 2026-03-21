@@ -1086,16 +1086,16 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <input 
                     type="text" 
                     value={editingFaculty.deadlineData?.value || ''}
-                    onChange={(e) => setEditingFaculty({...editingFaculty, deadlineData: { ...editingFaculty.deadlineData, value: e.target.value, sourceUrl: editingFaculty.deadlineData?.sourceUrl || '' }})}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, deadlineData: { ...editingFaculty.deadlineData, value: e.target.value, sourceUrls: editingFaculty.deadlineData?.sourceUrls || [] }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">截止日期来源URL</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">截止日期来源URL (多个用逗号分隔)</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.deadlineData?.sourceUrl || ''}
-                    onChange={(e) => setEditingFaculty({...editingFaculty, deadlineData: { ...editingFaculty.deadlineData, sourceUrl: e.target.value, value: editingFaculty.deadlineData?.value || '' }})}
+                    value={editingFaculty.deadlineData?.sourceUrls?.join(', ') || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, deadlineData: { ...editingFaculty.deadlineData, sourceUrls: e.target.value.split(',').map(s => s.trim()).filter(s => s !== ''), value: editingFaculty.deadlineData?.value || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1104,16 +1104,16 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">申请要求及材料</label>
                   <textarea 
                     value={editingFaculty.applicationReqsData?.value || ''}
-                    onChange={(e) => setEditingFaculty({...editingFaculty, applicationReqsData: { ...editingFaculty.applicationReqsData, value: e.target.value, sourceUrl: editingFaculty.applicationReqsData?.sourceUrl || '' }})}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, applicationReqsData: { ...editingFaculty.applicationReqsData, value: e.target.value, sourceUrls: editingFaculty.applicationReqsData?.sourceUrls || [] }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium h-20 resize-none"
                   />
                 </div>
                 <div className="col-span-2 space-y-2">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">申请要求来源URL</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">申请要求来源URL (多个用逗号分隔)</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.applicationReqsData?.sourceUrl || ''}
-                    onChange={(e) => setEditingFaculty({...editingFaculty, applicationReqsData: { ...editingFaculty.applicationReqsData, sourceUrl: e.target.value, value: editingFaculty.applicationReqsData?.value || '' }})}
+                    value={editingFaculty.applicationReqsData?.sourceUrls?.join(', ') || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, applicationReqsData: { ...editingFaculty.applicationReqsData, sourceUrls: e.target.value.split(',').map(s => s.trim()).filter(s => s !== ''), value: editingFaculty.applicationReqsData?.value || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1123,16 +1123,16 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <input 
                     type="text" 
                     value={editingFaculty.rpReqsData?.value || ''}
-                    onChange={(e) => setEditingFaculty({...editingFaculty, rpReqsData: { ...editingFaculty.rpReqsData, value: e.target.value, sourceUrl: editingFaculty.rpReqsData?.sourceUrl || '' }})}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, rpReqsData: { ...editingFaculty.rpReqsData, value: e.target.value, sourceUrls: editingFaculty.rpReqsData?.sourceUrls || [] }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">RP要求来源URL</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">RP要求来源URL (多个用逗号分隔)</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.rpReqsData?.sourceUrl || ''}
-                    onChange={(e) => setEditingFaculty({...editingFaculty, rpReqsData: { ...editingFaculty.rpReqsData, sourceUrl: e.target.value, value: editingFaculty.rpReqsData?.value || '' }})}
+                    value={editingFaculty.rpReqsData?.sourceUrls?.join(', ') || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, rpReqsData: { ...editingFaculty.rpReqsData, sourceUrls: e.target.value.split(',').map(s => s.trim()).filter(s => s !== ''), value: editingFaculty.rpReqsData?.value || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1142,16 +1142,16 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <input 
                     type="text" 
                     value={editingFaculty.tuitionData?.value || ''}
-                    onChange={(e) => setEditingFaculty({...editingFaculty, tuitionData: { ...editingFaculty.tuitionData, value: e.target.value, sourceUrl: editingFaculty.tuitionData?.sourceUrl || '' }})}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, tuitionData: { ...editingFaculty.tuitionData, value: e.target.value, sourceUrls: editingFaculty.tuitionData?.sourceUrls || [] }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">学费来源URL</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">学费来源URL (多个用逗号分隔)</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.tuitionData?.sourceUrl || ''}
-                    onChange={(e) => setEditingFaculty({...editingFaculty, tuitionData: { ...editingFaculty.tuitionData, sourceUrl: e.target.value, value: editingFaculty.tuitionData?.value || '' }})}
+                    value={editingFaculty.tuitionData?.sourceUrls?.join(', ') || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, tuitionData: { ...editingFaculty.tuitionData, sourceUrls: e.target.value.split(',').map(s => s.trim()).filter(s => s !== ''), value: editingFaculty.tuitionData?.value || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
@@ -1160,16 +1160,16 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">奖学金项目</label>
                   <textarea 
                     value={editingFaculty.scholarshipData?.value || ''}
-                    onChange={(e) => setEditingFaculty({...editingFaculty, scholarshipData: { ...editingFaculty.scholarshipData, value: e.target.value, sourceUrl: editingFaculty.scholarshipData?.sourceUrl || '' }})}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, scholarshipData: { ...editingFaculty.scholarshipData, value: e.target.value, sourceUrls: editingFaculty.scholarshipData?.sourceUrls || [] }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium h-20 resize-none"
                   />
                 </div>
                 <div className="col-span-2 space-y-2">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">奖学金来源URL</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">奖学金来源URL (多个用逗号分隔)</label>
                   <input 
                     type="text" 
-                    value={editingFaculty.scholarshipData?.sourceUrl || ''}
-                    onChange={(e) => setEditingFaculty({...editingFaculty, scholarshipData: { ...editingFaculty.scholarshipData, sourceUrl: e.target.value, value: editingFaculty.scholarshipData?.value || '' }})}
+                    value={editingFaculty.scholarshipData?.sourceUrls?.join(', ') || ''}
+                    onChange={(e) => setEditingFaculty({...editingFaculty, scholarshipData: { ...editingFaculty.scholarshipData, sourceUrls: e.target.value.split(',').map(s => s.trim()).filter(s => s !== ''), value: editingFaculty.scholarshipData?.value || '' }})}
                     className="w-full p-3 bg-white/60 backdrop-blur-sm border border-white/50 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all shadow-sm font-medium"
                   />
                 </div>

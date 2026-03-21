@@ -97,7 +97,7 @@ function buildSourceData(value?: string | null, urls?: string[]): SourceData | u
   if (!cleanedValue && sourceUrls.length === 0) return undefined;
   return {
     value: cleanedValue,
-    sourceUrl: sourceUrls[0] ?? '',
+    sourceUrls,
   };
 }
 
@@ -258,14 +258,19 @@ function normalizeProject(project: Partial<FacultyProject>): FacultyProject {
     programNameEn: cleanText(project.programNameEn),
     programUrl: cleanText(project.programUrl),
     deadlineRaw: stripUrls(project.deadlineRaw),
+    deadline: stripUrls(project.deadlineRaw),
     deadlineSourceUrls: mergeUrlArrays(project.deadlineSourceUrls, extractUrls(project.deadlineRaw)),
     applicationRequirementsRaw: stripUrls(project.applicationRequirementsRaw),
+    applicationReqs: stripUrls(project.applicationRequirementsRaw),
     applicationRequirementsSourceUrls: mergeUrlArrays(project.applicationRequirementsSourceUrls, extractUrls(project.applicationRequirementsRaw)),
     rpRequirementsRaw: stripUrls(project.rpRequirementsRaw),
+    rpReqs: stripUrls(project.rpRequirementsRaw),
     rpRequirementsSourceUrls: mergeUrlArrays(project.rpRequirementsSourceUrls, extractUrls(project.rpRequirementsRaw)),
     tuitionRaw: stripUrls(project.tuitionRaw),
+    tuition: stripUrls(project.tuitionRaw),
     tuitionSourceUrls: mergeUrlArrays(project.tuitionSourceUrls, extractUrls(project.tuitionRaw)),
     scholarshipRaw: stripUrls(project.scholarshipRaw),
+    scholarship: stripUrls(project.scholarshipRaw),
     scholarshipSourceUrls: mergeUrlArrays(project.scholarshipSourceUrls, extractUrls(project.scholarshipRaw)),
     recommendationReason: cleanText(project.recommendationReason),
     sourceWorkbook: cleanText(project.sourceWorkbook),
@@ -277,9 +282,9 @@ function normalizeProject(project: Partial<FacultyProject>): FacultyProject {
 
 function mergeSourceData(existing?: SourceData, incoming?: SourceData): SourceData | undefined {
   const value = stripUrls(incoming?.value) || stripUrls(existing?.value);
-  const sourceUrl = cleanText(incoming?.sourceUrl) || cleanText(existing?.sourceUrl);
-  if (!value && !sourceUrl) return undefined;
-  return { value, sourceUrl };
+  const sourceUrls = mergeUrlArrays(existing?.sourceUrls, incoming?.sourceUrls);
+  if (!value && sourceUrls.length === 0) return undefined;
+  return { value, sourceUrls };
 }
 
 function createProjectId(): string {
@@ -353,31 +358,31 @@ export function normalizeFacultyRecord(input: Partial<FacultyRecord> & Pick<Facu
   const deadlineSourceUrls = mergeUrlArrays(
     (input as FacultyRecord).deadlineSourceUrls,
     primaryProject?.deadlineSourceUrls,
-    input.deadlineData?.sourceUrl,
+    input.deadlineData?.sourceUrls,
     extractUrls(input.deadlineData?.value),
   );
   const applicationRequirementsSourceUrls = mergeUrlArrays(
     (input as FacultyRecord).applicationRequirementsSourceUrls,
     primaryProject?.applicationRequirementsSourceUrls,
-    input.applicationReqsData?.sourceUrl,
+    input.applicationReqsData?.sourceUrls,
     extractUrls(input.applicationReqsData?.value),
   );
   const rpRequirementsSourceUrls = mergeUrlArrays(
     (input as FacultyRecord).rpRequirementsSourceUrls,
     primaryProject?.rpRequirementsSourceUrls,
-    input.rpReqsData?.sourceUrl,
+    input.rpReqsData?.sourceUrls,
     extractUrls(input.rpReqsData?.value),
   );
   const tuitionSourceUrls = mergeUrlArrays(
     (input as FacultyRecord).tuitionSourceUrls,
     primaryProject?.tuitionSourceUrls,
-    input.tuitionData?.sourceUrl,
+    input.tuitionData?.sourceUrls,
     extractUrls(input.tuitionData?.value),
   );
   const scholarshipSourceUrls = mergeUrlArrays(
     (input as FacultyRecord).scholarshipSourceUrls,
     primaryProject?.scholarshipSourceUrls,
-    input.scholarshipData?.sourceUrl,
+    input.scholarshipData?.sourceUrls,
     extractUrls(input.scholarshipData?.value),
   );
 

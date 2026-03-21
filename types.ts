@@ -11,7 +11,7 @@ export interface MatchReasoning {
 
 export interface SourceData {
     value: string;
-    sourceUrl: string;
+    sourceUrls: string[];
 }
 
 export interface FacultyMember {

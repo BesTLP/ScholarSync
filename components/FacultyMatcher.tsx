@@ -444,11 +444,11 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
     if (!data) return "N/A";
     if (Array.isArray(data)) {
       if (data.length === 0) return "N/A";
-      return data.map(d => `${d.value} [Source: ${d.sourceUrl || 'N/A'}]`).join(" | ");
+      return data.map(d => `${d.value} [Source: ${d.sourceUrls?.join(', ') || 'N/A'}]`).join(" | ");
     }
     if (typeof data === 'string') return data;
-    if (!data.sourceUrl) return data.value;
-    return `${data.value} [Source: ${data.sourceUrl}]`;
+    if (!data.sourceUrls || data.sourceUrls.length === 0) return data.value;
+    return `${data.value} [Source: ${data.sourceUrls.join(', ')}]`;
   };
 
   const handleExportCSV = () => {
@@ -495,7 +495,7 @@ const FacultyMatcher: React.FC<FacultyMatcherProps> = ({
             `"${(prof.title || "").replace(/"/g, '""')}"`,
             `"${(prof.researchAreas || []).join("; ").replace(/"/g, '""')}"`,
             `"${top3Papers.replace(/"/g, '""')}"`,
-            `"${formatSourceField({ value: "主页链接", sourceUrl: prof.profileUrl || "" }).replace(/"/g, '""')}"`,
+            `"${formatSourceField({ value: "主页链接", sourceUrls: prof.profileUrl ? [prof.profileUrl] : [] }).replace(/"/g, '""')}"`,
             `"${(prof.alignmentDetails || "").replace(/"/g, '""')}"`,
             `"${(prof.email || "").replace(/"/g, '""')}"`,
             `"${(prof.universityUrl || "").replace(/"/g, '""')}"`,

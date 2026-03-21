@@ -418,7 +418,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
   // Helper for Excel Export formatting (reused logic if needed, but here just for display)
   const formatSourceField = (data?: SourceData) => {
       if (!data) return "N/A";
-      if (!data.sourceUrl) return data.value;
+      if (!data.sourceUrls || data.sourceUrls.length === 0) return data.value;
       return data.value; // In card we just show value, link is separate usually or implied
   };
 
@@ -845,48 +845,48 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                         <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
                             <div className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">QS World Ranking</div>
                             <div className="text-sm font-bold text-gray-800">{prof.qsRankingData.value}</div>
-                            {prof.qsRankingData.sourceUrl && <a href={prof.qsRankingData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
+                            {prof.qsRankingData.sourceUrls?.[0] && <a href={prof.qsRankingData.sourceUrls[0]} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
                         </div>
                     )}
                     {prof.rpReqsData?.value && (
                         <div className="bg-white/60 p-4 rounded-2xl border border-gray-100 shadow-sm">
                             <div className="text-[9px] font-black text-pink-600 uppercase tracking-widest mb-1">RP要求</div>
                             <div className="text-sm font-bold text-gray-800">{prof.rpReqsData.value}</div>
-                            {prof.rpReqsData.sourceUrl && <a href={prof.rpReqsData.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
+                            {prof.rpReqsData.sourceUrls?.[0] && <a href={prof.rpReqsData.sourceUrls[0]} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-500 hover:underline mt-1 inline-block">来源</a>}
                         </div>
                     )}
                 </div>
 
                 <div className="space-y-6">
-                    {prof.deadlineData?.value && (
+                    {!admissionLoaded && prof.deadlineData?.value && (
                         <InfoCard 
                             title="申请截止日期" 
                             content={prof.deadlineData.value} 
-                            defaultUrls={prof.deadlineData.sourceUrl ? [prof.deadlineData.sourceUrl] : []} 
+                            defaultUrls={prof.deadlineData.sourceUrls || []} 
                         />
                     )}
 
-                    {prof.applicationReqsData?.value && (
+                    {!admissionLoaded && prof.applicationReqsData?.value && (
                         <StructuredReqsCard 
                             title="申请要求及材料" 
                             content={prof.applicationReqsData.value} 
-                            defaultUrls={prof.applicationReqsData.sourceUrl ? [prof.applicationReqsData.sourceUrl] : []} 
+                            defaultUrls={prof.applicationReqsData.sourceUrls || []} 
                         />
                     )}
 
-                    {prof.tuitionData?.value && (
+                    {!admissionLoaded && prof.tuitionData?.value && (
                         <InfoCard 
                             title="学费" 
                             content={prof.tuitionData.value} 
-                            defaultUrls={prof.tuitionData.sourceUrl ? [prof.tuitionData.sourceUrl] : []} 
+                            defaultUrls={prof.tuitionData.sourceUrls || []} 
                         />
                     )}
 
-                    {prof.scholarshipData?.value && (
+                    {!admissionLoaded && prof.scholarshipData?.value && (
                         <InfoCard 
                             title="奖学金项目" 
                             content={prof.scholarshipData.value} 
-                            defaultUrls={prof.scholarshipData.sourceUrl ? [prof.scholarshipData.sourceUrl] : []} 
+                            defaultUrls={prof.scholarshipData.sourceUrls || []} 
                         />
                     )}
                 </div>
@@ -918,7 +918,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                     <InfoCard 
                         title="申请截止日期" 
                         content={admissionData.deadline.value} 
-                        defaultUrls={admissionData.deadline.sourceUrl ? [admissionData.deadline.sourceUrl] : []} 
+                        defaultUrls={admissionData.deadline.sourceUrls || []} 
                     />
                   )}
 
@@ -926,7 +926,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                     <StructuredReqsCard 
                         title="申请要求及材料" 
                         content={admissionData.requirements.value} 
-                        defaultUrls={admissionData.requirements.sourceUrl ? [admissionData.requirements.sourceUrl] : []} 
+                        defaultUrls={admissionData.requirements.sourceUrls || []} 
                     />
                   )}
 
@@ -934,7 +934,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                     <InfoCard 
                         title="学费" 
                         content={admissionData.tuition.value} 
-                        defaultUrls={admissionData.tuition.sourceUrl ? [admissionData.tuition.sourceUrl] : []} 
+                        defaultUrls={admissionData.tuition.sourceUrls || []} 
                     />
                   )}
 
@@ -942,7 +942,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                     <InfoCard 
                         title="奖学金项目" 
                         content={admissionData.scholarships.value} 
-                        defaultUrls={admissionData.scholarships.sourceUrl ? [admissionData.scholarships.sourceUrl] : []} 
+                        defaultUrls={admissionData.scholarships.sourceUrls || []} 
                     />
                   )}
               </div>
@@ -1091,9 +1091,9 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                                 <div className="text-lg font-black text-white leading-none">{prof.deadlineData.value}</div>
                             </div>
                         </div>
-                        {prof.deadlineData.sourceUrl && (
+                        {prof.deadlineData.sourceUrls?.[0] && (
                             <a 
-                                href={prof.deadlineData.sourceUrl} 
+                                href={prof.deadlineData.sourceUrls[0]} 
                                 target="_blank" 
                                 rel="noopener noreferrer"
                                 className="px-4 py-2 bg-white/20 backdrop-blur-md text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/30 transition-all flex items-center gap-2"
