@@ -795,30 +795,35 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
                                     <InfoCard 
                                         title="申请截止日期" 
                                         content={project.deadline} 
+                                        defaultUrls={project.deadlineSourceUrls || (prof as FacultyRecord).deadlineSourceUrls || []}
                                     />
                                 )}
                                 {project.applicationReqs && (
                                     <StructuredReqsCard 
                                         title="申请要求及材料" 
                                         content={project.applicationReqs} 
+                                        defaultUrls={project.applicationRequirementsSourceUrls || (prof as FacultyRecord).applicationRequirementsSourceUrls || []}
                                     />
                                 )}
                                 {project.rpReqs && (
                                     <InfoCard 
                                         title="RP要求" 
                                         content={project.rpReqs} 
+                                        defaultUrls={project.rpRequirementsSourceUrls || (prof as FacultyRecord).rpRequirementsSourceUrls || []}
                                     />
                                 )}
                                 {project.tuition && (
                                     <InfoCard 
                                         title="学费" 
                                         content={project.tuition} 
+                                        defaultUrls={project.tuitionSourceUrls || (prof as FacultyRecord).tuitionSourceUrls || []}
                                     />
                                 )}
                                 {project.scholarship && (
                                     <InfoCard 
                                         title="奖学金" 
                                         content={project.scholarship} 
+                                        defaultUrls={project.scholarshipSourceUrls || (prof as FacultyRecord).scholarshipSourceUrls || []}
                                     />
                                 )}
                             </div>
@@ -829,6 +834,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
         )}
 
         {/* Admission & Funding Data Section */}
+        {(!('projects' in prof) || !prof.projects || prof.projects.length === 0) && (
         <div className="mb-10">
           {/* Display existing data if available */}
           {(prof.qsRankingData || prof.deadlineData || prof.applicationReqsData || prof.rpReqsData || prof.tuitionData || prof.scholarshipData || prof.programName) && (
@@ -951,6 +957,7 @@ const FacultyCard: React.FC<FacultyCardProps> = ({
             <div className="text-center text-sm text-gray-400 py-4 bg-gray-50 rounded-2xl">暂未查询到招生数据</div>
           )}
         </div>
+        )}
 
         {/* === AUDIT REPORT CARD === */}
         <div className="bg-gray-50/50 backdrop-blur-sm border border-gray-100 rounded-[32px] overflow-hidden shadow-inner mb-10 relative">
