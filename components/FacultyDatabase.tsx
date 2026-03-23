@@ -7,6 +7,7 @@ import BatchClassifyModal from './BatchClassifyModal';
 import FacultyImportPreviewModal from './FacultyImportPreviewModal';
 import FacultyConflictModal from './FacultyConflictModal';
 import XlsxImportModal from './XlsxImportModal';
+import CustomExportModal from './CustomExportModal';
 import { importFacultyFromXlsx } from '../services/facultyImportService';
 import { refreshFacultyData, processImportedFacultyBatch, processImportedFacultyRow } from '../services/geminiService';
 import * as XLSX from 'xlsx';
@@ -71,6 +72,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
   const [isManualEntryModalOpen, setIsManualEntryModalOpen] = useState(false);
   const [isXlsxImportModalOpen, setIsXlsxImportModalOpen] = useState(false);
   const [isBatchClassifyModalOpen, setIsBatchClassifyModalOpen] = useState(false);
+  const [isCustomExportModalOpen, setIsCustomExportModalOpen] = useState(false);
   const [linkingFacultyId, setLinkingFacultyId] = useState<string | null>(null);
   const [editingFaculty, setEditingFaculty] = useState<FacultyRecord | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
@@ -298,388 +300,152 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
     }
   };
 
-  const handleExportCSV = () => {
-    const targetIds = selectedIds.size > 0 
-      ? Array.from(selectedIds) 
-      : filteredFaculty.map(f => f.id);
-    
-    if (targetIds.length === 0) return;
+  const handleExport = (selectedFields: string[]) => {
+    // Determine scope
+    // For simplicity, we will export all filtered faculty for now, 
+    // but the modal could be extended to allow choosing scope.
+    const dataToExport = filteredFaculty;
 
-    const dataToExport = facultyDatabase.filter(f => targetIds.includes(f.id));
-    
-    const BOM = "\uFEFF";
-    const headers = ["姓名", "职称", "院校", "学院/系", "邮箱", "国家/地区", "学科领域", "研究方向", "备注"];
-    const csvRows = [headers.join(",")];
-
-    dataToExport.forEach(f => {
-      const row = [
-        `"${f.name.replace(/"/g, '""')}"`,
-        `"${f.title.replace(/"/g, '""')}"`,
-        `"${f.university.replace(/"/g, '""')}"`,
-        `"${f.department.replace(/"/g, '""')}"`,
-        `"${f.email.replace(/"/g, '""')}"`,
-        `"${f.country.replace(/"/g, '""')}"`,
-        `"${f.fieldCategory.replace(/"/g, '""')}"`,
-        `"${f.researchAreas.join("; ").replace(/"/g, '""')}"`,
-        `"${(f.notes || "").replace(/"/g, '""')}"`
-      ];
-      csvRows.push(row.join(","));
+    const exportData = dataToExport.map(f => {
+      const row: Record<string, any> = {};
+      selectedFields.forEach(fieldId => {
+        let value: any = '';
+        switch (fieldId) {
+          case 'university': value = f.university; break;
+          case 'qsRanking': value = f.qsRanking; break;
+          case 'deadline': value = f.deadlineData?.value; break;
+          case 'programName': value = f.programName; break;
+          case 'programUrl': value = f.programUrl; break;
+          case 'applicationReqs': value = f.applicationReqsData?.value; break;
+          case 'rpReqs': value = f.rpReqsData?.value; break;
+          case 'researchAreas': value = f.researchAreas.join('; '); break;
+          case 'recommendationReason': value = f.recommendationReason; break;
+          case 'email': value = f.email; break;
+          case 'profileUrl': value = f.profileUrl; break;
+          case 'tuition': value = f.tuitionData?.value; break;
+          case 'scholarship': value = f.scholarshipData?.value; break;
+          case 'name': value = f.name; break;
+          case 'title': value = f.title; break;
+          case 'school': value = f.school; break;
+          default: value = '';
+        }
+        
+        // Find label
+        const fieldConfig = [
+          { id: 'university', label: '学校名称 (中英文)' },
+          { id: 'qsRanking', label: '2026QS综合排名' },
+          { id: 'deadline', label: '截止日期' },
+          { id: 'programName', label: '专业名称 (中英文)' },
+          { id: 'programUrl', label: '专业链接' },
+          { id: 'applicationReqs', label: '申请要求及材料' },
+          { id: 'rpReqs', label: 'RP字数要求' },
+          { id: 'researchAreas', label: '导师研究方向 (论文)' },
+          { id: 'recommendationReason', label: '推荐理由' },
+          { id: 'email', label: '导师邮箱' },
+          { id: 'profileUrl', label: '导师官网链接' },
+          { id: 'tuition', label: '学费' },
+          { id: 'scholarship', label: '奖学金项目' },
+          { id: 'name', label: '导师姓名' },
+          { id: 'title', label: '导师职称' },
+          { id: 'school', label: '学院/School' },
+        ].find(f => f.id === fieldId);
+        
+        row[fieldConfig?.label || fieldId] = value || '';
+      });
+      return row;
     });
 
-    const csvContent = csvRows.join("\n");
-    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `Faculty_Database_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, '导师数据');
+    XLSX.writeFile(workbook, `导师数据导出_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   return (
-    <div className="flex h-screen bg-transparent overflow-hidden">
-      {/* Left Sidebar: Statistics & Quick Filters */}
-      <div className="w-64 glass border-r border-white/50 flex-shrink-0 flex flex-col overflow-y-auto custom-scrollbar">
-        <div className="p-6 border-b border-white/50">
-          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2 tracking-tight">
-            <Database size={20} className="text-blue-600" />
-            导师库概览
-          </h2>
-          <p className="text-xs text-gray-500 mt-1 font-medium">共收录 {facultyDatabase.length} 位导师</p>
-        </div>
-
-        <div className="p-4 space-y-6">
-          {/* Geography Stats */}
-          <div>
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">地理层级</h3>
-            <div className="space-y-1">
-              <button 
-                onClick={() => { 
-                  setSelectedCountry('all'); 
-                  setSelectedProvinceState('all'); 
-                  setSelectedCity('all');
-                }}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedCountry === 'all' ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
-              >
-                <span>全部国家</span>
-                <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{facultyDatabase.length}</span>
-              </button>
-              {countries.map(country => {
-                const count = facultyDatabase.filter(f => f.country === country).length;
-                const isSelected = selectedCountry === country;
-                return (
-                  <div key={country} className="space-y-1">
-                    <button 
-                      onClick={() => { 
-                        setSelectedCountry(country); 
-                        setSelectedProvinceState('all'); 
-                        setSelectedCity('all');
-                      }}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${isSelected ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
-                    >
-                      <span>{country}</span>
-                      <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{count}</span>
-                    </button>
-                    {isSelected && provinceStates.length > 0 && (
-                      <div className="pl-4 space-y-1 animate-in slide-in-from-top-1 duration-200">
-                        {provinceStates.map(prov => {
-                          const provCount = facultyDatabase.filter(f => f.country === country && f.provinceState === prov).length;
-                          const isProvSelected = selectedProvinceState === prov;
-                          return (
-                            <div key={prov} className="space-y-1">
-                              <button
-                                onClick={() => {
-                                  setSelectedProvinceState(prov);
-                                  setSelectedCity('all');
-                                }}
-                                className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-xs transition-all ${isProvSelected ? 'text-blue-600 font-bold bg-blue-50/30' : 'text-gray-500 hover:text-gray-700 font-medium'}`}
-                              >
-                                <span>{prov}</span>
-                                <span>{provCount}</span>
-                              </button>
-                              {isProvSelected && cities.length > 0 && (
-                                <div className="pl-4 space-y-1">
-                                  {cities.map(city => {
-                                    const cityCount = facultyDatabase.filter(f => f.country === country && f.provinceState === prov && f.city === city).length;
-                                    return (
-                                      <button
-                                        key={city}
-                                        onClick={() => setSelectedCity(city)}
-                                        className={`w-full flex items-center justify-between px-3 py-1 rounded-lg text-[10px] transition-all ${selectedCity === city ? 'text-blue-500 font-bold' : 'text-gray-400 hover:text-gray-600 font-medium'}`}
-                                      >
-                                        <span>{city}</span>
-                                        <span>{cityCount}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+    <div className="flex flex-col h-screen bg-gray-50/50 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Sidebar: Filters */}
+        <div className="w-72 bg-white border-r border-gray-200 flex-shrink-0 flex flex-col overflow-y-auto shadow-sm">
+          <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              <Filter size={18} className="text-blue-600" />
+              筛选导师
+            </h2>
+            <button 
+              onClick={() => {
+                setSelectedCountry('all');
+                setSelectedProvinceState('all');
+                setSelectedCity('all');
+                setSelectedUniversity('all');
+                setSelectedSchool('all');
+                setSelectedDepartment('all');
+                setSelectedField('all');
+                setSelectedSubField('all');
+                setSelectedTag('all');
+              }}
+              className="text-xs text-gray-500 hover:text-blue-600 font-medium transition-colors"
+            >
+              重置筛选
+            </button>
           </div>
 
-          {/* Organization Stats */}
-          <div>
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">组织层级</h3>
-            <div className="space-y-1">
-              <button 
-                onClick={() => { 
-                  setSelectedUniversity('all'); 
-                  setSelectedSchool('all'); 
-                  setSelectedDepartment('all');
-                }}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedUniversity === 'all' ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
-              >
-                <span>全部院校</span>
-                <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{facultyDatabase.length}</span>
-              </button>
-              {universities.map(uni => {
-                const count = facultyDatabase.filter(f => f.university === uni).length;
-                const isSelected = selectedUniversity === uni;
-                return (
-                  <div key={uni} className="space-y-1">
-                    <button 
-                      onClick={() => { 
-                        setSelectedUniversity(uni); 
-                        setSelectedSchool('all'); 
-                        setSelectedDepartment('all');
-                      }}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${isSelected ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
-                    >
-                      <span className="truncate pr-2">{uni}</span>
-                      <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm flex-shrink-0">{count}</span>
-                    </button>
-                    {isSelected && schools.length > 0 && (
-                      <div className="pl-4 space-y-1 animate-in slide-in-from-top-1 duration-200">
-                        {schools.map(sch => {
-                          const schCount = facultyDatabase.filter(f => f.university === uni && f.school === sch).length;
-                          const isSchSelected = selectedSchool === sch;
-                          return (
-                            <div key={sch} className="space-y-1">
-                              <button
-                                onClick={() => {
-                                  setSelectedSchool(sch);
-                                  setSelectedDepartment('all');
-                                }}
-                                className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-xs transition-all ${isSchSelected ? 'text-blue-600 font-bold bg-blue-50/30' : 'text-gray-500 hover:text-gray-700 font-medium'}`}
-                              >
-                                <span className="truncate pr-2">{sch}</span>
-                                <span className="flex-shrink-0">{schCount}</span>
-                              </button>
-                              {isSchSelected && departments.length > 0 && (
-                                <div className="pl-4 space-y-1">
-                                  {departments.map(dept => {
-                                    const deptCount = facultyDatabase.filter(f => f.university === uni && f.school === sch && f.department === dept).length;
-                                    return (
-                                      <button
-                                        key={dept}
-                                        onClick={() => setSelectedDepartment(dept)}
-                                        className={`w-full flex items-center justify-between px-3 py-1 rounded-lg text-[10px] transition-all ${selectedDepartment === dept ? 'text-blue-500 font-bold' : 'text-gray-400 hover:text-gray-600 font-medium'}`}
-                                      >
-                                        <span className="truncate pr-2">{dept}</span>
-                                        <span className="flex-shrink-0">{deptCount}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Field Stats */}
-          <div>
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">按学科领域</h3>
-            <div className="space-y-1">
-              <button 
-                onClick={() => { setSelectedField('all'); setSelectedSubField('all'); }}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedField === 'all' ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
-              >
-                <span>全部</span>
-                <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{facultyDatabase.length}</span>
-              </button>
-              {fields.map(field => {
-                const count = facultyDatabase.filter(f => f.fieldCategory === field).length;
-                const isSelected = selectedField === field;
-                return (
-                  <div key={field} className="space-y-1">
-                    <button 
-                      onClick={() => { setSelectedField(field); setSelectedSubField('all'); }}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${isSelected ? 'bg-blue-50/80 text-blue-700 font-bold shadow-sm' : 'text-gray-600 hover:bg-white/60 font-medium'}`}
-                    >
-                      <span>{field}</span>
-                      <span className="bg-white/80 text-gray-500 px-2 py-0.5 rounded-md text-xs shadow-sm">{count}</span>
-                    </button>
-                    {isSelected && subFields.length > 0 && (
-                      <div className="pl-4 space-y-1 animate-in slide-in-from-top-1 duration-200">
-                        {subFields.map(sub => {
-                          const subCount = facultyDatabase.filter(f => f.fieldCategory === field && f.subFieldCategory === sub).length;
-                          return (
-                            <button
-                              key={sub}
-                              onClick={() => setSelectedSubField(sub)}
-                              className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition-all ${selectedSubField === sub ? 'text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-white/40'}`}
-                            >
-                              <span>{sub}</span>
-                              <span>{subCount}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Tag Stats */}
-          {allTags.length > 0 && (
-            <div>
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">按标签</h3>
-              <div className="flex flex-wrap gap-2 px-2">
-                <button
-                  onClick={() => setSelectedTag('all')}
-                  className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${selectedTag === 'all' ? 'bg-blue-600 text-white shadow-md' : 'bg-white/60 text-gray-500 hover:bg-white'}`}
-                >
-                  全部
-                </button>
-                {allTags.map(tag => (
-                  <button
-                    key={tag}
-                    onClick={() => setSelectedTag(tag)}
-                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${selectedTag === tag ? 'bg-blue-600 text-white shadow-md' : 'bg-white/60 text-gray-500 hover:bg-white'}`}
-                  >
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Toolbar */}
-        <div className="glass border-b border-white/50 px-6 py-4 flex flex-col gap-4 shadow-sm z-10">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4 flex-1">
-              <div className="relative w-96">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                <input 
-                  type="text" 
-                  placeholder="搜索导师姓名、院校、研究方向..." 
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all shadow-sm"
-                />
-              </div>
-              
-              {/* Filters Dropdown (Hierarchical) */}
-              <div className="flex items-center gap-2">
-                {selectedCountry !== 'all' && provinceStates.length > 0 && (
-                  <select 
-                    value={selectedProvinceState} 
-                    onChange={(e) => {
-                      setSelectedProvinceState(e.target.value);
-                      setSelectedCity('all');
-                      setSelectedUniversity('all');
-                    }}
-                    className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200"
-                  >
-                    <option value="all">所有省/州</option>
-                    {provinceStates.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                )}
-
-                {selectedProvinceState !== 'all' && cities.length > 0 && (
-                  <select 
-                    value={selectedCity} 
-                    onChange={(e) => {
-                      setSelectedCity(e.target.value);
-                      setSelectedUniversity('all');
-                    }}
-                    className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200"
-                  >
-                    <option value="all">所有城市</option>
-                    {cities.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                )}
-
+          <div className="p-4 space-y-4">
+            {[
+              { label: '国家', value: selectedCountry, options: countries, onChange: (v: string) => { setSelectedCountry(v); setSelectedProvinceState('all'); setSelectedCity('all'); setSelectedUniversity('all'); setSelectedSchool('all'); setSelectedDepartment('all'); } },
+              { label: '州 / 省', value: selectedProvinceState, options: provinceStates, onChange: (v: string) => { setSelectedProvinceState(v); setSelectedCity('all'); setSelectedUniversity('all'); setSelectedSchool('all'); setSelectedDepartment('all'); } },
+              { label: '城市', value: selectedCity, options: cities, onChange: (v: string) => { setSelectedCity(v); setSelectedUniversity('all'); setSelectedSchool('all'); setSelectedDepartment('all'); } },
+              { label: '大学', value: selectedUniversity, options: universities, onChange: (v: string) => { setSelectedUniversity(v); setSelectedSchool('all'); setSelectedDepartment('all'); } },
+              { label: '学院 / School', value: selectedSchool, options: schools, onChange: (v: string) => { setSelectedSchool(v); setSelectedDepartment('all'); } },
+              { label: '系 / Department', value: selectedDepartment, options: departments, onChange: setSelectedDepartment },
+            ].map((filter) => (
+              <div key={filter.label} className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-400 uppercase tracking-wider px-1">{filter.label}</label>
                 <select 
-                  value={selectedUniversity} 
-                  onChange={(e) => {
-                    setSelectedUniversity(e.target.value);
-                    setSelectedSchool('all');
-                    setSelectedDepartment('all');
-                  }}
-                  className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm"
+                  value={filter.value}
+                  onChange={(e) => filter.onChange(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                 >
-                  <option value="all">所有院校</option>
-                  {universities.map(u => <option key={u} value={u}>{u}</option>)}
+                  <option value="all">全部</option>
+                  {filter.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                 </select>
-
-                {selectedUniversity !== 'all' && schools.length > 0 && (
-                  <select 
-                    value={selectedSchool} 
-                    onChange={(e) => {
-                      setSelectedSchool(e.target.value);
-                      setSelectedDepartment('all');
-                    }}
-                    className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200"
-                  >
-                    <option value="all">所有学院</option>
-                    {schools.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                )}
-
-                {selectedUniversity !== 'all' && departments.length > 0 && (
-                  <select 
-                    value={selectedDepartment} 
-                    onChange={(e) => setSelectedDepartment(e.target.value)}
-                    className="px-3 py-2 bg-white/50 backdrop-blur-sm border border-white/50 rounded-xl text-sm text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200"
-                  >
-                    <option value="all">所有系/部门</option>
-                    {departments.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                )}
               </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Toolbar */}
+          <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm z-10">
+            <div className="relative w-96">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              <input 
+                type="text" 
+                placeholder="搜索导师姓名、院校、研究方向..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+              />
             </div>
 
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => setIsXlsxImportModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-white/60 backdrop-blur-sm border border-white/50 text-gray-700 rounded-xl hover:bg-white/80 transition-all shadow-sm font-bold active:scale-95"
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 transition-all font-medium"
               >
                 <Upload size={16} />
                 批量导入
               </button>
               <button 
                 onClick={() => setIsManualEntryModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-white/60 backdrop-blur-sm border border-white/50 text-gray-700 rounded-xl hover:bg-white/80 transition-all shadow-sm font-bold active:scale-95"
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 transition-all font-medium"
               >
                 <Plus size={16} />
                 手动录入
               </button>
               <button 
                 onClick={() => setIsSearchModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md shadow-blue-500/20 font-bold active:scale-95"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-medium"
               >
                 <Globe size={16} />
                 联网搜索导入
@@ -687,7 +453,7 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-2">
+          <div className="flex items-center justify-between pt-2 px-6">
             <div className="flex items-center gap-4 text-sm text-gray-500 font-medium">
               <span className="font-bold text-gray-900">
                 {filteredFaculty.length}
@@ -711,11 +477,11 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
                     批量删除
                   </button>
                   <button 
-                    onClick={handleExportCSV}
+                    onClick={() => setIsCustomExportModalOpen(true)}
                     className="flex items-center gap-1 text-gray-600 hover:text-gray-900 hover:bg-white/60 px-2 py-1 rounded-lg transition-colors font-bold"
                   >
                     <Download size={14} />
-                    导出 CSV
+                    自定义导出
                   </button>
                 </div>
               )}
@@ -736,176 +502,175 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
               </button>
             </div>
           </div>
-        </div>
 
-        {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-          {filteredFaculty.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400">
-              <Search size={48} className="mb-4 opacity-20" />
-              <p className="text-lg font-medium text-gray-500">没有找到匹配的导师</p>
-              <p className="text-sm">尝试调整搜索关键词或筛选条件</p>
-            </div>
-          ) : (
-            <>
-              {viewMode === 'grid' ? (
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                  {filteredFaculty.map(faculty => (
-                    <div key={faculty.id} className="relative group">
-                      {/* Selection Checkbox Overlay */}
-                      <div className={`absolute top-3 left-3 z-30 transition-opacity ${selectedIds.has(faculty.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                        <input 
-                          type="checkbox" 
-                          checked={selectedIds.has(faculty.id)}
-                          onChange={() => toggleSelection(faculty.id)}
-                          className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shadow-sm"
-                        />
-                      </div>
-                      <FacultyCard 
-                        prof={faculty} 
-                        isDatabaseView={true}
-                        onEdit={(record) => setEditingFaculty(record)}
-                        onDelete={onDeleteFaculty}
-                        onRefresh={handleRefreshFaculty}
-                        onLink={(prof) => setLinkingFacultyId(faculty.id)}
-                        onUnlink={(id) => onUnlinkFaculty(faculty.id, id)}
-                        linkedClientCount={faculty.linkedClientIds?.length || 0}
-                      />
-                      {refreshingId === faculty.id && (
-                        <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] z-40 flex items-center justify-center rounded-xl">
-                          <div className="flex flex-col items-center gap-2">
-                            <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-                            <span className="text-xs font-bold text-blue-700">正在更新数据...</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="glass border border-white/50 rounded-2xl shadow-sm overflow-hidden">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-white/40 border-b border-white/50 text-xs font-bold text-gray-500 uppercase tracking-wider backdrop-blur-sm">
-                        <th className="p-4 w-12 text-center">
+          {/* Content Area */}
+          <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+            {filteredFaculty.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                <Search size={48} className="mb-4 opacity-20" />
+                <p className="text-lg font-medium text-gray-500">没有找到匹配的导师</p>
+                <p className="text-sm">尝试调整搜索关键词或筛选条件</p>
+              </div>
+            ) : (
+              <>
+                {viewMode === 'grid' ? (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                    {filteredFaculty.map(faculty => (
+                      <div key={faculty.id} className="relative group">
+                        {/* Selection Checkbox Overlay */}
+                        <div className={`absolute top-3 left-3 z-30 transition-opacity ${selectedIds.has(faculty.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                           <input 
                             type="checkbox" 
-                            checked={selectedIds.size === filteredFaculty.length && filteredFaculty.length > 0}
-                            onChange={toggleAllSelection}
-                            className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shadow-sm"
+                            checked={selectedIds.has(faculty.id)}
+                            onChange={() => toggleSelection(faculty.id)}
+                            className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shadow-sm"
                           />
-                        </th>
-                        <th className="p-4">导师姓名</th>
-                        <th className="p-4">院校 / 职级</th>
-                        <th className="p-4">研究方向</th>
-                        <th className="p-4">匹配度</th>
-                        <th className="p-4">关联学生</th>
-                        <th className="p-4 text-right">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/30">
-                      {filteredFaculty.map(faculty => (
-                        <tr key={faculty.id} className={`hover:bg-white/60 transition-colors ${selectedIds.has(faculty.id) ? 'bg-blue-50/50' : ''}`}>
-                          <td className="p-4 text-center">
+                        </div>
+                        <FacultyCard 
+                          prof={faculty} 
+                          isDatabaseView={true}
+                          onEdit={(record) => setEditingFaculty(record)}
+                          onDelete={onDeleteFaculty}
+                          onRefresh={handleRefreshFaculty}
+                          onLink={(prof) => setLinkingFacultyId(faculty.id)}
+                          onUnlink={(id) => onUnlinkFaculty(faculty.id, id)}
+                          linkedClientCount={faculty.linkedClientIds?.length || 0}
+                        />
+                        {refreshingId === faculty.id && (
+                          <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] z-40 flex items-center justify-center rounded-xl">
+                            <div className="flex flex-col items-center gap-2">
+                              <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                              <span className="text-xs font-bold text-blue-700">正在更新数据...</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="glass border border-white/50 rounded-2xl shadow-sm overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-white/40 border-b border-white/50 text-xs font-bold text-gray-500 uppercase tracking-wider backdrop-blur-sm">
+                          <th className="p-4 w-12 text-center">
                             <input 
                               type="checkbox" 
-                              checked={selectedIds.has(faculty.id)}
-                              onChange={() => toggleSelection(faculty.id)}
+                              checked={selectedIds.size === filteredFaculty.length && filteredFaculty.length > 0}
+                              onChange={toggleAllSelection}
                               className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shadow-sm"
                             />
-                          </td>
-                          <td className="p-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-white/60 backdrop-blur-sm flex items-center justify-center text-gray-500 font-bold text-sm overflow-hidden shadow-sm">
-                                {faculty.photoUrl ? (
-                                  <img src={faculty.photoUrl} alt={faculty.name} className="w-full h-full object-cover" />
-                                ) : (
-                                  faculty.name.charAt(0)
-                                )}
-                              </div>
-                              <div>
-                                <div className="font-bold text-gray-900 tracking-tight">{faculty.name}</div>
-                                <div className="text-xs text-gray-500 font-medium">{faculty.country}</div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="p-4">
-                            <div className="font-bold text-gray-900">{faculty.university}</div>
-                            <div className="text-xs text-gray-500 font-medium">{faculty.title}</div>
-                          </td>
-                          <td className="p-4">
-                            <div className="flex flex-wrap gap-1 max-w-xs">
-                              {faculty.researchAreas.slice(0, 2).map((area, i) => (
-                                <span key={i} className="px-2 py-0.5 bg-white/60 backdrop-blur-sm text-gray-600 rounded-md text-xs truncate max-w-[100px] shadow-sm border border-white/50 font-medium">
-                                  {area}
-                                </span>
-                              ))}
-                              {faculty.researchAreas.length > 2 && (
-                                <span className="px-2 py-0.5 bg-white/40 text-gray-500 rounded-md text-xs border border-white/30 font-medium">
-                                  +{faculty.researchAreas.length - 2}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-4">
-                            <span className={`px-2 py-1 rounded-md text-xs font-bold shadow-sm ${
-                              faculty.matchScore >= 90 ? 'bg-emerald-50/80 text-emerald-700 border border-emerald-100/50' :
-                              faculty.matchScore >= 80 ? 'bg-blue-50/80 text-blue-700 border border-blue-100/50' :
-                              'bg-amber-50/80 text-amber-700 border border-amber-100/50'
-                            }`}>
-                              {faculty.matchScore}%
-                            </span>
-                          </td>
-                          <td className="p-4">
-                            {faculty.linkedClientIds && faculty.linkedClientIds.length > 0 ? (
-                              <div className="flex -space-x-2">
-                                {faculty.linkedClientIds.slice(0, 3).map(cid => {
-                                  const client = clients.find(c => c.id === cid);
-                                  return (
-                                    <div key={cid} className="w-8 h-8 rounded-full bg-white/80 backdrop-blur-sm border-2 border-white shadow-sm flex items-center justify-center text-xs font-bold text-gray-600" title={client?.name}>
-                                      {client?.name.charAt(0)}
-                                    </div>
-                                  );
-                                })}
-                                {faculty.linkedClientIds.length > 3 && (
-                                  <div className="w-8 h-8 rounded-full bg-white/60 backdrop-blur-sm border-2 border-white flex items-center justify-center text-xs font-bold text-gray-500 shadow-sm">
-                                    +{faculty.linkedClientIds.length - 3}
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-gray-400 text-xs font-medium">-</span>
-                            )}
-                          </td>
-                          <td className="p-4 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button 
-                                onClick={() => setLinkingFacultyId(faculty.id)}
-                                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-white/60 rounded-lg transition-all active:scale-95"
-                                title="关联学生"
-                              >
-                                <UserPlus size={16} />
-                              </button>
-                              <button 
-                                onClick={() => onDeleteFaculty(faculty.id)}
-                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-white/60 rounded-lg transition-all active:scale-95"
-                                title="删除"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          </td>
+                          </th>
+                          <th className="p-4">导师姓名</th>
+                          <th className="p-4">院校 / 职级</th>
+                          <th className="p-4">研究方向</th>
+                          <th className="p-4">匹配度</th>
+                          <th className="p-4">关联学生</th>
+                          <th className="p-4 text-right">操作</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
+                      </thead>
+                      <tbody className="divide-y divide-white/30">
+                        {filteredFaculty.map(faculty => (
+                          <tr key={faculty.id} className={`hover:bg-white/60 transition-colors ${selectedIds.has(faculty.id) ? 'bg-blue-50/50' : ''}`}>
+                            <td className="p-4 text-center">
+                              <input 
+                                type="checkbox" 
+                                checked={selectedIds.has(faculty.id)}
+                                onChange={() => toggleSelection(faculty.id)}
+                                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shadow-sm"
+                              />
+                            </td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-white/60 backdrop-blur-sm flex items-center justify-center text-gray-500 font-bold text-sm overflow-hidden shadow-sm">
+                                  {faculty.photoUrl ? (
+                                    <img src={faculty.photoUrl} alt={faculty.name} className="w-full h-full object-cover" />
+                                  ) : (
+                                    faculty.name.charAt(0)
+                                  )}
+                                </div>
+                                <div>
+                                  <div className="font-bold text-gray-900 tracking-tight">{faculty.name}</div>
+                                  <div className="text-xs text-gray-500 font-medium">{faculty.country}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <div className="font-bold text-gray-900">{faculty.university}</div>
+                              <div className="text-xs text-gray-500 font-medium">{faculty.title}</div>
+                            </td>
+                            <td className="p-4">
+                              <div className="flex flex-wrap gap-1 max-w-xs">
+                                {faculty.researchAreas.slice(0, 2).map((area, i) => (
+                                  <span key={i} className="px-2 py-0.5 bg-white/60 backdrop-blur-sm text-gray-600 rounded-md text-xs truncate max-w-[100px] shadow-sm border border-white/50 font-medium">
+                                    {area}
+                                  </span>
+                                ))}
+                                {faculty.researchAreas.length > 2 && (
+                                  <span className="px-2 py-0.5 bg-white/40 text-gray-500 rounded-md text-xs border border-white/30 font-medium">
+                                    +{faculty.researchAreas.length - 2}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <span className={`px-2 py-1 rounded-md text-xs font-bold shadow-sm ${
+                                faculty.matchScore >= 90 ? 'bg-emerald-50/80 text-emerald-700 border border-emerald-100/50' :
+                                faculty.matchScore >= 80 ? 'bg-blue-50/80 text-blue-700 border border-blue-100/50' :
+                                'bg-amber-50/80 text-amber-700 border border-amber-100/50'
+                              }`}>
+                                {faculty.matchScore}%
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              {faculty.linkedClientIds && faculty.linkedClientIds.length > 0 ? (
+                                <div className="flex -space-x-2">
+                                  {faculty.linkedClientIds.slice(0, 3).map(cid => {
+                                    const client = clients.find(c => c.id === cid);
+                                    return (
+                                      <div key={cid} className="w-8 h-8 rounded-full bg-white/80 backdrop-blur-sm border-2 border-white shadow-sm flex items-center justify-center text-xs font-bold text-gray-600" title={client?.name}>
+                                        {client?.name.charAt(0)}
+                                      </div>
+                                    );
+                                  })}
+                                  {faculty.linkedClientIds.length > 3 && (
+                                    <div className="w-8 h-8 rounded-full bg-white/60 backdrop-blur-sm border-2 border-white flex items-center justify-center text-xs font-bold text-gray-500 shadow-sm">
+                                      +{faculty.linkedClientIds.length - 3}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400 text-xs font-medium">-</span>
+                              )}
+                            </td>
+                            <td className="p-4 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button 
+                                  onClick={() => setLinkingFacultyId(faculty.id)}
+                                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-white/60 rounded-lg transition-all active:scale-95"
+                                  title="关联学生"
+                                >
+                                  <UserPlus size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => onDeleteFaculty(faculty.id)}
+                                  className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-white/60 rounded-lg transition-all active:scale-95"
+                                  title="删除"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
-
       <BatchClassifyModal 
         isOpen={isBatchClassifyModalOpen}
         onClose={() => setIsBatchClassifyModalOpen(false)}
@@ -914,6 +679,13 @@ const FacultyDatabase: React.FC<FacultyDatabaseProps> = ({
           onBatchUpdateFaculty?.(Array.from(selectedIds), updates);
           setSelectedIds(new Set());
         }}
+      />
+
+      <CustomExportModal
+        isOpen={isCustomExportModalOpen}
+        onClose={() => setIsCustomExportModalOpen(false)}
+        selectedMentors={filteredFaculty}
+        onExport={handleExport}
       />
 
       <FacultySearchModal 

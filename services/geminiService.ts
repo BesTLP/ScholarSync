@@ -189,34 +189,35 @@ export const decomposeResearchField = async (
   const ai = getClient();
   
   const prompt = `
-    Task: Analyze whether this research direction is a "niche/rare interdisciplinary field" that is unlikely to have a single professor perfectly matching it.
-    
+    Role: You are a Retrieval Planner. Your goal is to determine if a research direction is so niche or highly interdisciplinary that a direct search will fail to find matching faculty, requiring a decomposed search strategy.
+
+    **CRITICAL RULES**:
+    1. **Conservative Detection**: Default to isNiche = false. Only set isNiche = true if a direct search for the original phrase is almost guaranteed to return zero or irrelevant results.
+    2. **Specific != Niche**: A specific research topic (e.g., "Deep Learning in Medical Imaging") is NOT necessarily niche. If it is a standard, well-defined academic field, keep it as is (isNiche = false).
+    3. **Phrases != Interdisciplinary**: Multi-word academic phrases (e.g., "Digital Humanities", "Public Finance") are atomic disciplines. Do NOT decompose them.
+    4. **Decomposition Purpose**: Decomposition is ONLY for expanding search recall. It must NOT change the original research goal.
+    5. **Dimension Precision**: If you MUST decompose, use the minimum number of dimensions (3-4) that are absolutely necessary to cover the original topic. Do not add adjacent or loosely related fields.
+    6. **Uncertainty**: If you are unsure if a field is niche, return isNiche = false.
+
     Research Direction: "${department}"
     Student Background: "${studentProfile || 'Not provided'}"
-    
+
     **Step 1: Niche Detection**
-    Determine if this field is:
-    - A well-established discipline with many professors (e.g., "Computer Science", "Economics") → isNiche = false
-    - A rare/highly interdisciplinary field where no single professor likely covers everything (e.g., "古籍修复", "Music Therapy for Alzheimer's", "Space Law", "Computational Archaeology") → isNiche = true
-    
+    - Analyze if the direction is a standard, well-defined academic field (isNiche = false).
+    - Only if it is a rare, highly specific interdisciplinary combination that cannot be found via direct search, set isNiche = true.
+
     **Step 2: If isNiche = true, decompose into academic dimensions**
-    Break the field into 3-6 concrete academic disciplines/sub-fields that collectively cover the student's research interest. For each dimension:
-    - dimension: A recognized academic discipline name (Chinese + English)
-    - keywords: 2-3 search keywords that would find professors in this dimension who have SOME connection to the original topic
-    - description: Why this dimension is relevant (1 sentence, Chinese)
-    
-    Example for "古籍修复":
-    [
-      { "dimension": "材料科学与保护 (Conservation Science)", "keywords": ["paper conservation chemistry professor", "文物保护材料科学"], "description": "古籍的纸张、墨水、装帧材料的科学分析与保护技术" },
-      { "dimension": "文献学与版本学 (Textual Studies)", "keywords": ["classical Chinese bibliography professor", "古典文献学教授"], "description": "古籍的文字内容鉴定、版本源流考证" },
-      { "dimension": "艺术品修复 (Art Conservation)", "keywords": ["book restoration conservation professor", "书画修复教授"], "description": "修复技法、修复伦理、实操训练" },
-      { "dimension": "数字人文 (Digital Humanities)", "keywords": ["digital heritage preservation professor", "数字化古籍"], "description": "古籍数字化扫描、AI辅助文字识别与修复" }
-    ]
-    
+    - Break the field into 3-4 concrete academic disciplines that collectively cover the original research interest.
+    - dimension: A recognized academic discipline name (Chinese + English).
+    - keywords: 2-3 search keywords that would find professors in this dimension who have SOME connection to the original topic.
+    - description: Why this dimension is relevant (1 sentence, Chinese).
+
     **Step 3: If isNiche = false**
-    Return dimensions as a single entry with the original field name.
-    
-    Output Language: Chinese for descriptions, English+Chinese for dimension names.
+    - Return dimensions as a single entry with the original field name.
+
+    **Reasoning**: You MUST provide a clear, concise explanation in Chinese for why you chose to decompose or not. If you chose not to decompose, explain why the original phrase is sufficient for retrieval.
+
+    Output Language: Chinese for descriptions/reasoning, English+Chinese for dimension names.
   `;
 
   const schema: Schema = {
@@ -398,13 +399,21 @@ export const generateFacultyMatches = async (params: MatchParams): Promise<Facul
   const isInterdisciplinary = departmentKeywords.length > 1;
 
   let promptContent = `
-    Role: You are a rigorous Academic Admissions Auditor. Your goal is to find high-quality faculty matches with VERIFIED admissions data.
+    Role: You are a strict, high-precision Faculty Matcher. Your goal is to find the most topically precise faculty matches based on the provided department focus and research keywords.
     
-    **CRITICAL INSTRUCTION: DO NOT TRANSLATE CONTENT.**
-    - If the source information is in Chinese, keep it in Chinese.
-    - If the source information is in English, keep it in English.
-    - DO NOT translate program names, research areas, or requirements unless explicitly requested.
-    - FAITHFULLY ADHERE to the original language of the source material.
+    **CRITICAL RULES**:
+    1. **Department Focus is Primary**: The "Department Focus" is the main semantic target. "Research Keywords" are supplementary and MUST NOT override the natural academic meaning of the Department Focus.
+    2. **Atomic Phrases**: Do not split established academic phrases (e.g., "machine learning", "digital humanities", "public finance", "human-computer interaction"). Treat them as atomic units.
+    3. **Interdisciplinary Logic**: Do not assume interdisciplinary nature unless the input explicitly joins independent fields (e.g., "and", "&", "+", "与", "和", "交叉", "intersection of").
+    4. **Ranking Priority**:
+       1. Exact Topical Fit (Precision is paramount)
+       2. Evidence Strength
+       3. Coverage Completeness
+       4. Prestige
+    5. **Precision vs. Fame**: A niche, exact match is superior to a famous, loosely related match. Do not favor famous faculty if their research is only tangentially related.
+    6. **Uncertainty**: Do not guess. If a match is not precise, downrank it and explicitly label it as "Partial Match" or "Adjacent Field, Not Precise".
+    7. **No Generalization**: You are not a general analysis assistant. You are a precise matcher.
+    8. **Language Preservation**: FAITHFULLY ADHERE to the original language of the source material (Chinese or English). DO NOT translate program names, research areas, or requirements.
 
     **CURRENT DATE CONTEXT**: Today is ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}.
     **DEADLINE REQUIREMENT**: You MUST look for future deadlines (Spring ${nextYear} or Fall ${nextYear}). Do NOT return past dates from 2024/2025 unless no other info is available.
@@ -1792,17 +1801,25 @@ export const refreshFacultyData = async (existing: FacultyMember): Promise<Facul
 export const extractKeywords = async (profile: string, department: string): Promise<string[]> => {
   const ai = getClient();
   const prompt = `
-    Task: Extract 10-15 essential academic and research keywords from the following student profile and target department.
-    Focus on specific research topics, methodologies, and technical terms.
-    
-    Department: ${department}
+    Role: You are a Retrieval Keyword Extractor. Your goal is to extract 8-12 high-value, precise academic keywords for faculty search.
+
+    **CRITICAL RULES**:
+    1. **Atomic Phrases**: Preserve complete academic phrases as atomic units. Do NOT split them into isolated words (e.g., "machine learning" is ONE keyword, not ["machine", "learning"]).
+    2. **Standard Phrases**: Keep established academic phrases intact (e.g., "digital humanities", "public finance", "music therapy", "human-computer interaction").
+    3. **Department Priority**: The "Department" input has higher priority than the "Profile" input.
+    4. **No Vague Terms**: Avoid generic words like "research", "study", "analysis", "education", "system".
+    5. **Decomposition Constraint**: Only output multiple keywords if the input explicitly contains multiple independent research directions.
+    6. **Niche Preservation**: If the target direction is a niche phrase, keep it intact as a single keyword.
+    7. **Retrieval Focus**: Every keyword must be a noun phrase that a professor would use to describe their own research. Do not break phrases to increase keyword count.
+
+    Department: "${department}"
     Profile:
     """
     ${profile}
     """
     
     Output Format: JSON array of strings.
-    Example: ["Machine Learning", "Computer Vision", "Deep Learning", "Medical Imaging"]
+    Example: ["Machine Learning", "Digital Humanities", "Public Finance", "Music Therapy"]
   `;
 
   try {
@@ -1845,8 +1862,20 @@ export const scoreFacultyFromDatabase = async (
   }));
 
   const prompt = `
-    Task: You are an expert Academic Admissions Matcher. Your goal is to evaluate how well each of the following faculty members matches a student's research profile.
-    
+    Role: You are a strict, high-precision Faculty Match Auditor. Your goal is to evaluate how well each of the following faculty members matches a student's research profile. This is a "Strict Fit Audit," not a general relevance ranking.
+
+    **CRITICAL RULES**:
+    1. **Strict Fit Audit**: This is not a general relevance ranking. You must penalize "broadly related" matches that lack precise topical overlap. 
+    2. **Natural Academic Semantics**: Target directions must be understood by their natural academic meaning. Do not mechanically split multi-word academic phrases (e.g., "machine learning" is one direction, not two).
+    3. **Interdisciplinary Handling**: Only treat as interdisciplinary if the input explicitly joins independent fields (e.g., "and", "&", "与", "交叉").
+    4. **Precision > Fame**: Precise topical fit is superior to prestige, fame, or university ranking. Niche but accurate matches MUST rank higher than famous but broadly related ones.
+    5. **Evidence-Based Scoring**: If evidence is insufficient, lower the score. Do not assume fit based on common knowledge.
+    6. **Alignment Details**: You MUST distinguish between:
+       - "精确匹配" (Exact Match)
+       - "部分匹配" (Partial Match)
+       - "方向相邻但不精确" (Adjacent Field, Not Precise)
+    7. **Interdisciplinary Reporting**: If the target is a true interdisciplinary field, 'researchFit' MUST explicitly detail coverage for each dimension.
+
     Student Profile:
     """
     ${studentProfile}
@@ -1859,8 +1888,8 @@ export const scoreFacultyFromDatabase = async (
     
     Instructions:
     1. For each faculty member, calculate a 'matchScore' (0-100) based on their research fit with the student's profile.
-    2. Provide a detailed 'alignmentDetails' (in Chinese) explaining WHY they are a good match.
-    3. Provide a 'matchReasoning' object with specific checks.
+    2. Provide a detailed 'alignmentDetails' (in Chinese) explaining WHY they are a good match, using the required distinctions (精确匹配, 部分匹配, 方向相邻但不精确).
+    3. Provide a 'matchReasoning' object with specific checks, ensuring 'researchFit' details coverage for each dimension if interdisciplinary.
     4. Return the results as a JSON array of objects, where each object contains the 'id' from the input list and the updated matching fields.
     
     Output Format (JSON Array):
@@ -1868,12 +1897,12 @@ export const scoreFacultyFromDatabase = async (
       {
         "id": 0,
         "matchScore": 95,
-        "alignmentDetails": "该导师的研究方向与学生在...方面的背景高度契合...",
+        "alignmentDetails": "精确匹配: 该导师的研究方向与学生在...方面的背景高度契合...",
         "matchReasoning": {
           "locationCheck": "符合",
           "universityCheck": "符合",
           "departmentCheck": "高度匹配",
-          "researchFit": "研究兴趣完全一致",
+          "researchFit": "精确匹配: 研究兴趣完全一致; 交叉学科维度覆盖: [维度1: ✅, 维度2: ✅]",
           "positionCheck": "符合要求",
           "activityCheck": "活跃",
           "reputationCheck": "优秀"
